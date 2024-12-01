@@ -65,7 +65,7 @@ This project is a Discord self-bot that automatically sends messages to a specif
 
 - Be cautious with the frequency of messages, as excessive activity could result in a Discord account being temporarily or permanently banned.
 - Ensure that your Discord account token is kept private and secure.
-- Modify the message and delay settings in `configserver.json` to match your desired schedule.
+- Modify the message and delay settings in `config.json` to match your desired schedule.
 
 ## License
 

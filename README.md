@@ -50,7 +50,7 @@ This project is a Discord self-bot that automatically sends messages to a specif
 
 4. Run the bot:
     ```bash
-    node bot.js
+    node main.js
     ```
 
 ## 💬 Commands

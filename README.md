@@ -13,7 +13,7 @@ This project is a Discord self-bot that automatically sends messages to a specif
 
 1. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/Discord-SelfBot-MessageScheduler.git
+    git clone https://github.com/Gioxaa/Discord-SelfBot-MessageScheduler.git
     cd Discord-SelfBot-MessageScheduler
     ```
 

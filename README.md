@@ -60,6 +60,8 @@ This project is a Discord self-bot that automatically sends messages to a specif
   - Server name and channel name.
   - Time until the next message is sent.
   - Message content sent.
+ ![png]([URL_GAMBAR](https://cdn.discordapp.com/attachments/1292881258862477395/1320719131917680681/image.png?ex=676a9f0a&is=67694d8a&hm=8e339274b2d9a9bd07496da52f1275e755addde1ae1d675fe52fb3e0d6df2826&))
+
 
 ## 💡 Tips
 

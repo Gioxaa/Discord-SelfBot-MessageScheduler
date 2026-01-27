@@ -5,6 +5,7 @@ import { User, Client } from 'discord.js';
 import { config, PRODUCTS } from '../config';
 import { AdminService } from './admin.service';
 import { WorkspaceService } from './workspace.service';
+import { renderPaymentSuccess } from '../views/payment.view';
 
 export class PaymentService {
     /**
@@ -228,7 +229,27 @@ export class PaymentService {
 
         // 3. Ensure Workspace Exists
         if (config.guildId) {
-            await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId, days);
+            await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId);
+        }
+
+        // 4. Update Invoice Message (DM) to Success
+        if (transaction.invoiceMessageId) {
+            try {
+                const user = await client.users.fetch(transaction.userId);
+                const dmChannel = await user.createDM();
+                const msg = await dmChannel.messages.fetch(transaction.invoiceMessageId);
+                
+                if (msg) {
+                    const product = Object.values(PRODUCTS).find(p => p.price === transaction.amount);
+                    const productName = product ? product.name : 'Premium Plan';
+
+                    const successView = renderPaymentSuccess(productName, transaction.amount, transaction.id);
+                    await msg.edit(successView);
+                    Logger.info(`[Payment] Updated DM Invoice for ${transaction.userId}`, 'PaymentService');
+                }
+            } catch (e) {
+                Logger.warn(`[Payment] Failed to update DM Invoice for ${transaction.userId}`, 'PaymentService');
+            }
         }
     }
 }

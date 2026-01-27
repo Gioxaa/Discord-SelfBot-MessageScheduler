@@ -36,3 +36,27 @@ export function renderPaymentInvoice(productName: string, price: number, qrUrl: 
 
     return { embeds: [embed], components: [row] };
 }
+
+export function renderPaymentSuccess(productName: string = 'Premium Plan', price: number = 0, transactionId: string) {
+    const embed = new EmbedBuilder()
+        .setAuthor({ name: 'FREY PAYMENT' })
+        .setTitle('PAYMENT SUCCESSFUL ✅')
+        .setDescription(`
+**Thank You!**
+Your payment has been received and your subscription is active.
+
+**Transaction Details**
+» Product : **${productName}**
+» Price   : **Rp ${price.toLocaleString('id-ID')}**
+» TRX ID  : \`${transactionId}\`
+
+**Next Steps**
+1. Check your new private workspace.
+2. Go to your **Control Panel** to manage tasks.
+`)
+        .setColor(0x57F287) // Green
+        .setFooter({ text: 'AutoPost Payment System' })
+        .setTimestamp();
+
+    return { embeds: [embed], components: [] };
+}

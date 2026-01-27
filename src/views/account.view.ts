@@ -5,9 +5,19 @@ export async function renderAccountList(userId: string) {
     const accounts = await prisma.account.findMany({ where: { userId } });
 
     const embed = new EmbedBuilder()
-        .setTitle('Account Manager')
-        .setDescription(`You have connected **${accounts.length}** accounts.\nSelect an account from the dropdown below to view details, check status, or remove it.`)
-        .setColor(0x2B2D31);
+        .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **ACCOUNT MANAGER** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**OVERVIEW**
+> <a:arrow:1306059259615903826> Connected Accounts : **${accounts.length}**
+\u200b
+**YOUR ACCOUNTS**
+${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${acc.name || 'Unnamed'}** \n   ID: \`${acc.id.substring(0, 18)}...\``).join('\n') : '> *No accounts connected yet.*'}
+`)
+        .setColor(0x57F287)
+        .setFooter({ text: 'AutoPost | Powered by Frey' })
+        .setTimestamp()
+        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
 
     const components: any[] = [];
 
@@ -51,10 +61,10 @@ export async function renderAccountDetail(accountId: string, status?: { isValid:
     const account = await prisma.account.findUnique({ where: { id: accountId } });
 
     if (!account) {
-        return { 
-            content: 'Account not found.', 
-            embeds: [], 
-            components: [] 
+        return {
+            content: 'Account not found.',
+            embeds: [],
+            components: []
         };
     }
 
@@ -68,12 +78,12 @@ export async function renderAccountDetail(accountId: string, status?: { isValid:
         );
 
     if (status) {
-        embed.addFields({ 
-            name: 'Token Status', 
-            value: status.isValid 
-                ? `[Valid] Logged in as ${status.username}` 
-                : `[Invalid] Token expired or flagged`, 
-            inline: false 
+        embed.addFields({
+            name: 'Token Status',
+            value: status.isValid
+                ? `[Valid] Logged in as ${status.username}`
+                : `[Invalid] Token expired or flagged`,
+            inline: false
         });
         embed.setColor(status.isValid ? 0x57F287 : 0xED4245);
     } else {

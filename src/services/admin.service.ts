@@ -1,6 +1,7 @@
 import prisma from '../database/client';
 import { WorkspaceService } from './workspace.service';
 import { Logger } from '../utils/logger';
+import { Client } from 'discord.js';
 
 export class AdminService {
     
@@ -40,7 +41,7 @@ export class AdminService {
         });
     }
 
-    static async addTime(userId: string, days: number) {
+    static async addTime(userId: string, days: number, hours: number = 0, minutes: number = 0, client?: Client) {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) throw new Error('User not found');
 
@@ -48,25 +49,39 @@ export class AdminService {
         // If expired, start from now
         if (newExpiry < new Date()) newExpiry = new Date();
         
-        newExpiry.setDate(newExpiry.getDate() + days);
+        const durationMs = (days * 24 * 60 * 60 * 1000) + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+        newExpiry.setTime(newExpiry.getTime() + durationMs);
 
-        return prisma.user.update({
+        const updatedUser = await prisma.user.update({
             where: { id: userId },
             data: { expiryDate: newExpiry }
         });
+
+        if (client) {
+            await WorkspaceService.refreshControlPanel(client, userId);
+        }
+
+        return updatedUser;
     }
 
-    static async removeTime(userId: string, days: number) {
+    static async removeTime(userId: string, days: number, hours: number = 0, minutes: number = 0, client?: Client) {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user || !user.expiryDate) throw new Error('User has no active subscription');
 
         const newExpiry = new Date(user.expiryDate);
-        newExpiry.setDate(newExpiry.getDate() - days);
+        const durationMs = (days * 24 * 60 * 60 * 1000) + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+        newExpiry.setTime(newExpiry.getTime() - durationMs);
 
-        return prisma.user.update({
+        const updatedUser = await prisma.user.update({
             where: { id: userId },
             data: { expiryDate: newExpiry }
         });
+
+        if (client) {
+            await WorkspaceService.refreshControlPanel(client, userId);
+        }
+
+        return updatedUser;
     }
 
     static async deleteWorkspace(userId: string, client: any) {

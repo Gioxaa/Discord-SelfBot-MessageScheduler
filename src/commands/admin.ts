@@ -21,15 +21,19 @@ export const adminCommand: Command = {
         )
         .addSubcommand(sub => 
             sub.setName('add_time')
-               .setDescription('Add subscription days to a user')
+               .setDescription('Add subscription time to a user')
                .addUserOption(opt => opt.setName('target').setDescription('The user').setRequired(true))
-               .addIntegerOption(opt => opt.setName('days').setDescription('Days to add').setRequired(true))
+               .addIntegerOption(opt => opt.setName('days').setDescription('Days to add').setRequired(false))
+               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to add').setRequired(false))
+               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to add').setRequired(false))
         )
         .addSubcommand(sub => 
             sub.setName('remove_time')
-               .setDescription('Remove subscription days from a user')
+               .setDescription('Remove subscription time from a user')
                .addUserOption(opt => opt.setName('target').setDescription('The user').setRequired(true))
-               .addIntegerOption(opt => opt.setName('days').setDescription('Days to remove').setRequired(true))
+               .addIntegerOption(opt => opt.setName('days').setDescription('Days to remove').setRequired(false))
+               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to remove').setRequired(false))
+               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to remove').setRequired(false))
         )
         .addSubcommand(sub => 
             sub.setName('delete_workspace')
@@ -78,18 +82,32 @@ export const adminCommand: Command = {
 
             else if (subcommand === 'add_time') {
                 const targetUser = interaction.options.getUser('target', true);
-                const days = interaction.options.getInteger('days', true);
+                const days = interaction.options.getInteger('days') || 0;
+                const hours = interaction.options.getInteger('hours') || 0;
+                const minutes = interaction.options.getInteger('minutes') || 0;
+
+                if (days === 0 && hours === 0 && minutes === 0) {
+                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', ephemeral: true });
+                    return;
+                }
                 
-                await AdminService.addTime(targetUser.id, days);
-                await interaction.reply({ content: `✅ Added ${days} days to ${targetUser.username}.`, ephemeral: true });
+                await AdminService.addTime(targetUser.id, days, hours, minutes, interaction.client);
+                await interaction.reply({ content: `✅ Added **${days}d ${hours}h ${minutes}m** to ${targetUser.username}. Workspace updated.`, ephemeral: true });
             }
 
             else if (subcommand === 'remove_time') {
                 const targetUser = interaction.options.getUser('target', true);
-                const days = interaction.options.getInteger('days', true);
+                const days = interaction.options.getInteger('days') || 0;
+                const hours = interaction.options.getInteger('hours') || 0;
+                const minutes = interaction.options.getInteger('minutes') || 0;
                 
-                await AdminService.removeTime(targetUser.id, days);
-                await interaction.reply({ content: `✅ Removed ${days} days from ${targetUser.username}.`, ephemeral: true });
+                if (days === 0 && hours === 0 && minutes === 0) {
+                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', ephemeral: true });
+                    return;
+                }
+
+                await AdminService.removeTime(targetUser.id, days, hours, minutes, interaction.client);
+                await interaction.reply({ content: `✅ Removed **${days}d ${hours}h ${minutes}m** from ${targetUser.username}. Workspace updated.`, ephemeral: true });
             }
 
             else if (subcommand === 'delete_workspace') {
@@ -97,14 +115,23 @@ export const adminCommand: Command = {
                 await interaction.deferReply({ ephemeral: true });
                 
                 await AdminService.deleteWorkspace(targetUser.id, interaction.client);
-                await interaction.editReply(`🗑️ Workspace for ${targetUser.username} has been deleted.`);
+                
+                try {
+                    await interaction.editReply(`🗑️ Workspace for ${targetUser.username} has been deleted.`);
+                } catch (e) {
+                    // Channel likely deleted, ignore error
+                }
             }
 
         } catch (error: any) {
-            if (interaction.replied || interaction.deferred) {
-                await interaction.editReply({ content: `❌ Error: ${error.message}` });
-            } else {
-                await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.editReply({ content: `❌ Error: ${error.message}` });
+                } else {
+                    await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
+                }
+            } catch (e) {
+                console.error('[AdminCommand] Failed to send error response:', e);
             }
         }
     }

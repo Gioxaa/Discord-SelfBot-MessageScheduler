@@ -10,43 +10,48 @@ import { renderControlPanel } from '../views/controlPanel.view';
 
 export class WorkspaceService {
   
-  static async createWorkspace(client: Client, guildId: String, userId: string, durationDays: number) {
+  static async createWorkspace(client: Client, guildId: String, userId: string) {
     const guild = client.guilds.cache.get(guildId.toString());
     if (!guild) throw new Error('Guild not found');
 
     const user = await client.users.fetch(userId);
     if (!user) throw new Error('User not found');
 
-    // 1. Calculate Expiry
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + durationDays);
-
-    // 2. Check if user already exists in DB
+    // 1. Get User Data (Expiry is already updated by AdminService)
     let dbUser = await prisma.user.findUnique({ where: { id: userId } });
+    const expiryDate = dbUser?.expiryDate || new Date(); // Fallback to now if missing
+
     
     // If user has existing workspace, check if channel still exists
     let existingChannel = dbUser?.workspaceChannelId ? guild.channels.cache.get(dbUser.workspaceChannelId) : null;
 
     if (existingChannel) {
-        // Just extend duration
-        await prisma.user.update({
-            where: { id: userId },
-            data: { expiryDate: expiryDate }
-        });
+        // Just extend duration (Data already updated in AdminService, just notify)
         const channel = existingChannel as TextChannel;
-        await channel.send(`✅ **Extension Successful!** Your plan has been extended until ${expiryDate.toLocaleString()}`);
+        await channel.send(`✅ **Extension Successful!** Your plan is active until ${expiryDate.toLocaleString()}`);
         
         // Resend Dashboard to ensure UI is up to date
         await this.sendDashboard(channel, userId);
         return;
     }
 
-    // 3. Create Private Channel
+    // 3. Ensure Category Exists
+    let category = guild.channels.cache.find(c => c.name === 'Workspaces' && c.type === ChannelType.GuildCategory);
+    
+    if (!category) {
+        category = await guild.channels.create({
+            name: 'Workspaces',
+            type: ChannelType.GuildCategory
+        });
+    }
+
+    // 4. Create Private Channel
     const channelName = `workspace-${user.username.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
     
     const channel = await guild.channels.create({
       name: channelName,
       type: ChannelType.GuildText,
+      parent: category.id,
       permissionOverwrites: [
         {
           id: guild.id, // @everyone
@@ -71,20 +76,19 @@ export class WorkspaceService {
       reason: 'Logs for selfbot activity',
     });
 
-    // 5. Update Database
+    // 5. Update Database (Do NOT overwrite expiryDate)
     await prisma.user.upsert({
       where: { id: userId },
       update: {
         workspaceChannelId: channel.id,
         logThreadId: thread.id,
-        expiryDate: expiryDate,
         username: user.tag
       },
       create: {
         id: userId,
         workspaceChannelId: channel.id,
         logThreadId: thread.id,
-        expiryDate: expiryDate,
+        expiryDate: expiryDate, // Only set on create if new
         username: user.tag
       }
     });

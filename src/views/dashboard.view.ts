@@ -32,9 +32,23 @@ export async function renderDashboard(userId: string) {
     }
 
     // 2. Build Embed
+    const activeCount = tasks.filter(t => t.status === 'RUNNING').length;
+    const inactiveCount = tasks.length - activeCount;
+
     const embed = new EmbedBuilder()
-        .setDescription(`> **Active Tasks**\nMonitoring **${tasks.length}** running processes.`)
-        .setColor(0x2B2D31);
+        .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK MANAGER** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROCESS OVERVIEW**
+> <a:on:1306062154616537109> Active Workers : **${activeCount}**
+> <a:offline:1306203222263988285> Inactive Workers : **${inactiveCount}**
+> <a:arrow:1306059259615903826> Total Workers  : **${tasks.length}**
+\u200b
+`)
+        .setColor(0x57F287)
+        .setFooter({ text: 'AutoPost | Powered by Frey' })
+        .setTimestamp()
+        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
 
     const selectMenu = new StringSelectMenuBuilder()
         .setCustomId('select_manage_task')
@@ -44,28 +58,29 @@ export async function renderDashboard(userId: string) {
     const displayTasks = tasks.slice(0, 10);
 
     displayTasks.forEach((task, index) => {
-        const statusIcon = task.status === 'RUNNING' ? '🟢' : '⚫';
+        const isRunning = task.status === 'RUNNING';
+        const statusIcon = isRunning ? '<a:on:1306062154616537109>' : '<a:offline:1306203222263988285>';
         const accountName = task.account.name || 'Unnamed';
         // Use guildName/channelName from DB if available, fallback to ID
         const guildDisplay = task.guildName || 'Unknown Server';
         const channelDisplay = task.channelName ? `#${task.channelName}` : `<#${task.channelId}>`;
-        const slowmodeDisplay = task.channelSlowmode ? `(Slowmode: ${task.channelSlowmode}s)` : '';
-        
-        // Format Interval
-        const intervalDisplay = `${formatDuration(task.minDelay/1000)} - ${formatDuration(task.maxDelay/1000)}`;
+        const slowmodeDisplay = task.channelSlowmode ? `(${task.channelSlowmode}s)` : '';
 
-        // Single Field per Task (Clean & Compact - NO EXTRA EMOJIS)
+        // Format Interval
+        const intervalDisplay = `${formatDuration(task.minDelay / 1000)} - ${formatDuration(task.maxDelay / 1000)}`;
+
+        // Single Field per Task (Clean & Compact with Emojis)
         embed.addFields({
-            name: `${statusIcon} ${accountName}`,
-            value: `> 📂 Server: ${guildDisplay}\n> #️⃣ Channel: ${channelDisplay} ${slowmodeDisplay}\n> ⏱️ Interval: ${intervalDisplay}`,
+            name: `${statusIcon} **${accountName}**`,
+            value: `<a:arrow:1306059259615903826> Server : **${guildDisplay}**\n<a:arrow:1306059259615903826> Channel : ${channelDisplay} ${slowmodeDisplay}\n<a:arrow:1306059259615903826> Interval : \`${intervalDisplay}\`\n<a:arrow:1306059259615903826> Sent : **${task.totalSent.toLocaleString()}**`,
             inline: false
         });
 
         selectMenu.addOptions({
-            label: `${accountName} -> ${task.channelId}`,
-            description: `${task.status}`,
+            label: `${accountName} -> ${task.guildName?.substring(0, 20) || 'Server'}`,
+            description: `Status: ${task.status}`,
             value: task.id,
-            emoji: task.status === 'RUNNING' ? '🟢' : '⚫'
+            emoji: isRunning ? { id: '1306062154616537109', animated: true } : { id: '1306203222263988285', animated: true }
         });
     });
 
@@ -74,7 +89,7 @@ export async function renderDashboard(userId: string) {
     }
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-    
+
     // Removed "Back to Menu" button as requested
 
     return {

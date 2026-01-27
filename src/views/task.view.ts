@@ -15,16 +15,30 @@ export function renderTaskPanel(task: any) {
     }
     if (!msgPreview) msgPreview = '(No Content)';
 
+    const statusIcon = status === 'RUNNING' ? '<a:on:1306062154616537109>' : '<a:offline:1306203222263988285>';
+
     const embed = new EmbedBuilder()
-        .setDescription(`> **Task Configuration**\nCurrently viewing settings for this task.`)
-        .setColor(status === 'RUNNING' ? 0x57F287 : 0xED4245)
-        .addFields(
-            { name: 'Status', value: status === 'RUNNING' ? 'Running' : 'Stopped', inline: true },
-            { name: 'Account', value: accountName, inline: true },
-            { name: 'Target', value: `<#${task.channelId}>`, inline: true },
-            { name: 'Interval', value: `${minDelay}s - ${maxDelay}s`, inline: true },
-            { name: 'Message Preview', value: `\`\`\`${msgPreview}\`\`\``, inline: false }
-        );
+        .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK CONFIGURATION** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROCESS STATUS**
+<a:arrow:1306059259615903826> Status  : ${statusIcon} **${status}**
+<a:arrow:1306059259615903826> Account : **${accountName}**
+
+**TARGET & TIMING**
+<a:arrow:1306059259615903826> Target  : <#${task.channelId}>
+<a:arrow:1306059259615903826> Interval: **${minDelay}s - ${maxDelay}s**
+<a:arrow:1306059259615903826> Sent    : **${task.totalSent.toLocaleString()}**
+
+**MESSAGE CONTENT**
+\`\`\`
+${msgPreview}
+\`\`\`
+`)
+        .setColor(0x57F287)
+        .setFooter({ text: 'AutoPost | Powered by Frey' })
+        .setTimestamp()
+        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
 
     const row = new ActionRowBuilder<ButtonBuilder>();
     

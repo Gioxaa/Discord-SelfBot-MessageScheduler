@@ -6,15 +6,23 @@ export class AdminService {
     
     static async getStats() {
         const totalUsers = await prisma.user.count();
+        const totalAccounts = await prisma.account.count();
         const activeTasks = await prisma.task.count({ where: { status: 'RUNNING' } });
         const totalPayments = await prisma.payment.count({ where: { status: 'PAID' } });
+        
+        // Aggregate Total Messages
+        const msgStats = await prisma.task.aggregate({ _sum: { totalSent: true } });
+        const totalMessagesSent = msgStats._sum.totalSent || 0;
+
         // Calculate total revenue (Assuming amount is in Payment table)
         const payments = await prisma.payment.findMany({ where: { status: 'PAID' } });
         const revenue = payments.reduce((acc, curr) => acc + curr.amount, 0);
 
         return {
             totalUsers,
+            totalAccounts,
             activeTasks,
+            totalMessagesSent,
             totalPayments,
             revenue
         };

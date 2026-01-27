@@ -14,14 +14,14 @@ export const PRODUCTS: Record<string, PaymentProduct> = {
     '7_DAYS': {
         id: '7_DAYS',
         name: 'Weekly Access',
-        price: 10000,
+        price: parseInt(process.env.PRICE_7_DAYS || '10000'),
         durationDays: 7,
         description: 'Full access to Selfbot Manager for 7 days.'
     },
     '30_DAYS': {
         id: '30_DAYS',
         name: 'Monthly Access',
-        price: 35000,
+        price: parseInt(process.env.PRICE_30_DAYS || '35000'),
         durationDays: 30,
         description: 'Full access to Selfbot Manager for 30 days (Save 12%).'
     }

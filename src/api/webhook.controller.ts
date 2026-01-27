@@ -9,23 +9,10 @@ export class WebhookController {
         console.log('[Webhook] Received payment notification:', req.body);
   
         try {
-            const { status, transaction } = await PaymentService.handleWebhook(req.body);
+            const { status, transaction } = await PaymentService.handleWebhook(req.body, client);
 
             if (status === 'SUCCESS' && transaction) {
-                if (!config.guildId) {
-                    console.error('[Payment] Missing GUILD_ID in env');
-                    res.status(500).send('Config Error');
-                    return;
-                }
-
-                console.log(`[Payment] Verified! Unlocking workspace for user ${transaction.userId}...`);
-                
-                // Determine duration based on amount paid (Simple logic for now)
-                let duration = 7;
-                if (transaction.amount >= 30000) duration = 30; // 30 Days product
-
-                await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId, duration);
-                console.log(`[Payment] Workspace unlocked.`);
+                console.log(`[Payment] Verified! Subscription extended for user ${transaction.userId}...`);
             } else if (status === 'ALREADY_PROCESSED') {
                 console.log('[Payment] Transaction already processed.');
             } else {

@@ -13,8 +13,10 @@ model User {
   balance           Int       @default(0)
   expiryDate        DateTime?
   
+  
   workspaceChannelId String?
   logThreadId        String?
+  controlPanelMessageId String? // New: Track Control Panel Message
   
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -70,7 +72,15 @@ model Payment {
   
   amount      Int
   status      String
+  invoiceMessageId String?
+  
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model SystemConfig {
+  id             String @id @map("_id") // "main"
+  statsChannelId String?
+  statsMessageId String?
 }

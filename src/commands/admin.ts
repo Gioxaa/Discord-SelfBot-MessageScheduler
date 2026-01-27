@@ -3,6 +3,7 @@ import { Command } from '../interfaces/command';
 import { AdminService } from '../services/admin.service';
 import { config } from '../config';
 import { EmbedBuilder } from 'discord.js';
+import { renderStats } from '../views/stats.view';
 
 export const adminCommand: Command = {
     data: new SlashCommandBuilder()
@@ -52,16 +53,8 @@ export const adminCommand: Command = {
 
         try {
             if (subcommand === 'stats') {
-                const stats = await AdminService.getStats();
-                const embed = new EmbedBuilder()
-                    .setTitle('📊 System Statistics')
-                    .setColor(0x5865F2)
-                    .addFields(
-                        { name: 'Total Users', value: stats.totalUsers.toString(), inline: true },
-                        { name: 'Active Tasks', value: stats.activeTasks.toString(), inline: true },
-                        { name: 'Revenue', value: `Rp ${stats.revenue.toLocaleString('id-ID')}`, inline: true }
-                    );
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                const statsView = await renderStats();
+                await interaction.reply({ embeds: statsView.embeds, ephemeral: true });
             }
 
             else if (subcommand === 'user_info') {

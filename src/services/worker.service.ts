@@ -2,12 +2,16 @@ import { Worker } from 'worker_threads';
 import path from 'path';
 import prisma from '../database/client';
 import { Client, ThreadChannel } from 'discord.js';
+import { WorkspaceService } from './workspace.service';
 
 export class WorkerService {
   private static workers = new Map<string, Worker>(); // TaskID -> Worker
   private static restartCounters = new Map<string, { count: number, lastReset: number }>(); // TaskID -> Restart Info
   private static MAX_WORKERS_PER_USER = 5;
   private static MAX_RESTARTS_PER_HOUR = 5;
+
+  // Simple In-Memory Cache with 5-minute TTL
+  private static cache = new Map<string, { data: any, expires: number }>();
 
   static async startTask(client: Client, taskId: string) {
     const task = await prisma.task.findUnique({
@@ -82,6 +86,7 @@ export class WorkerService {
       } else {
           // Manual Stop (clean exit)
           this.restartCounters.delete(taskId);
+          // Refresh Panel if needed (though usually stopTask handles it)
       }
     });
 
@@ -91,6 +96,9 @@ export class WorkerService {
         where: { id: taskId },
         data: { status: 'RUNNING' }
     });
+
+    // Refresh Panel on Start
+    await WorkspaceService.refreshControlPanel(client, task.account.userId);
   }
 
   private static async handleAutoRestart(client: Client, taskId: string) {
@@ -110,6 +118,12 @@ export class WorkerService {
               where: { id: taskId },
               data: { status: 'STOPPED' }
           });
+          
+          // Refresh Panel on Crash Stop
+          const task = await prisma.task.findUnique({ where: { id: taskId }, include: { account: true } });
+          if (task) {
+             await WorkspaceService.refreshControlPanel(client, task.account.userId);
+          }
           return;
       }
 
@@ -145,15 +159,55 @@ export class WorkerService {
   // --- Fetch Methods ---
 
   static async fetchGuilds(token: string): Promise<any[]> {
-      return this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token });
+      const cacheKey = `guilds_${token.substring(0, 10)}`; // Partial token as key
+      if (this.checkCache(cacheKey)) {
+          return this.getCache(cacheKey);
+      }
+
+      const data = await this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token });
+      this.setCache(cacheKey, data);
+      return data;
   }
 
   static async fetchChannels(token: string, guildId: string): Promise<any[]> {
-      return this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId });
+      const cacheKey = `channels_${guildId}`;
+      if (this.checkCache(cacheKey)) {
+          return this.getCache(cacheKey);
+      }
+
+      const data = await this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId });
+      this.setCache(cacheKey, data);
+      return data;
   }
 
   static async fetchContext(token: string, guildId: string, channelId: string): Promise<{ guildName: string, channelName: string }> {
+      // Context is usually fast and specific, maybe skip cache or short TTL.
+      // But let's cache it too for consistency if needed.
+      // Actually fetchContext is used for task creation, better be fresh.
       return this.runEphemeralWorker({ mode: 'FETCH_CONTEXT', token, guildId, channelId });
+  }
+
+  // --- Cache Helpers ---
+  private static checkCache(key: string): boolean {
+      if (!this.cache.has(key)) return false;
+      const item = this.cache.get(key);
+      if (!item) return false;
+      if (Date.now() > item.expires) {
+          this.cache.delete(key);
+          return false;
+      }
+      return true;
+  }
+
+  private static getCache(key: string): any {
+      return this.cache.get(key)?.data;
+  }
+
+  private static setCache(key: string, data: any) {
+      this.cache.set(key, {
+          data,
+          expires: Date.now() + (5 * 60 * 1000) // 5 Minutes
+      });
   }
 
   static async sendPreview(token: string, threadId: string, inviteCode: string, message: string): Promise<void> {
@@ -239,7 +293,7 @@ export class WorkerService {
     console.log('[WorkerService] Startup Sync Completed.');
   }
 
-  static async stopTask(taskId: string) {
+  static async stopTask(client: Client, taskId: string) {
     // Explicit stop requested by user -> Clear auto-restart counters
     this.restartCounters.delete(taskId);
 
@@ -258,13 +312,19 @@ export class WorkerService {
       }, 1000);
     }
     
-    await prisma.task.update({
+    const task = await prisma.task.update({
         where: { id: taskId },
-        data: { status: 'STOPPED' }
+        data: { status: 'STOPPED' },
+        include: { account: true }
     });
+
+    // Refresh Panel on Stop
+    if (task) {
+        await WorkspaceService.refreshControlPanel(client, task.account.userId);
+    }
   }
 
-  static async shutdownAll() {
+  static async shutdownAll(client?: Client) {
     console.log('[WorkerService] Shutting down all workers...');
     for (const [taskId, worker] of this.workers) {
         worker.postMessage('STOP');
@@ -277,6 +337,9 @@ export class WorkerService {
     }
     this.workers.clear();
     this.restartCounters.clear();
+    
+    // Note: We don't refresh control panels here because server is shutting down anyway.
+    // If we wanted to, we'd need to loop through all unique users.
   }
 
   static async forwardLog(client: Client, userId: string, logData: any) {

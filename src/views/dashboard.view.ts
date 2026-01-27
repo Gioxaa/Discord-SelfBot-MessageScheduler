@@ -1,4 +1,4 @@
-import { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder } from 'discord.js';
+import { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import prisma from '../database/client';
 import { formatDuration } from '../utils/timeHelper';
 
@@ -16,10 +16,18 @@ export async function renderDashboard(userId: string) {
     });
 
     if (tasks.length === 0) {
+        const emptyRow = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('btn_back_menu')
+                    .setLabel('⬅️ Back to Menu')
+                    .setStyle(ButtonStyle.Secondary)
+            );
+
         return {
             content: '📭 No tasks found. Create one first!',
             embeds: [],
-            components: []
+            components: [emptyRow]
         };
     }
 
@@ -66,6 +74,8 @@ export async function renderDashboard(userId: string) {
     }
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+    
+    // Removed "Back to Menu" button as requested
 
     return {
         content: null,

@@ -36,7 +36,7 @@ async function main() {
     // Graceful Shutdown
     const shutdown = async () => {
         console.log('\n[System] Shutting down...');
-        await WorkerService.shutdownAll();
+        await WorkerService.shutdownAll(client);
         client.destroy();
         process.exit(0);
     };

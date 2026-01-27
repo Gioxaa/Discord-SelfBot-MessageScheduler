@@ -5,6 +5,7 @@ import { WorkerService } from '../services/worker.service';
 import { renderTaskPanel } from '../views/task.view';
 import { Logger } from '../utils/logger';
 import { validateOwnership } from '../utils/interactionGuard';
+import { renderAccountDetail } from '../views/account.view';
 
 export async function handleSelect(interaction: StringSelectMenuInteraction) {
     // Security Check
@@ -27,27 +28,47 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
                 const token = AccountService.getDecryptedToken(account);
                 const guilds = await WorkerService.fetchGuilds(token);
-                const topGuilds = guilds.slice(0, 25);
+                
+                const ITEMS_PER_PAGE = 25;
+                const slicedGuilds = guilds.slice(0, ITEMS_PER_PAGE);
+                
+                // Calculate Total Pages
+                const totalPages = Math.ceil(guilds.length / ITEMS_PER_PAGE);
+                const selectPlaceholder = `Select a server (Page 1/${totalPages})`;
 
                 const select = new StringSelectMenuBuilder()
                     .setCustomId(`select_guild_task_${accountId}`)
-                    .setPlaceholder('Choose a server...')
+                    .setPlaceholder(selectPlaceholder)
                     .addOptions(
-                        topGuilds.map((g: any) => new StringSelectMenuOptionBuilder()
+                        slicedGuilds.map((g: any) => new StringSelectMenuOptionBuilder()
                             .setLabel(g.name.substring(0, 100))
                             .setValue(g.id)
                             .setDescription(`ID: ${g.id}`)
                         )
                     );
 
+                const buttons: ButtonBuilder[] = [];
+                
+                // If more than 25, add Next button
+                if (guilds.length > ITEMS_PER_PAGE) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(`btn_page_guild_${accountId}_1`) // Go to Page 1 (index 1 = 2nd page)
+                            .setLabel('Next ➡️')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+                }
+
+                buttons.push(
+                    new ButtonBuilder().setCustomId(`btn_search_guild_${accountId}`).setLabel('Search').setStyle(ButtonStyle.Primary).setEmoji('🔍'),
+                    new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                );
+
                 await interaction.editReply({
                     content: `**Step 2: Select Server**`,
                     components: [
                         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
-                        new ActionRowBuilder<ButtonBuilder>().addComponents(
-                            new ButtonBuilder().setCustomId(`btn_search_guild_${accountId}`).setLabel('Search').setStyle(ButtonStyle.Primary).setEmoji('🔍'),
-                            new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                        )
+                        new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
                     ]
                 });
 
@@ -74,26 +95,45 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                     return;
                 }
 
-                const topChannels = channels.slice(0, 25);
+                // Pagination: Show first 25
+                const ITEMS_PER_PAGE = 25;
+                const slicedChannels = channels.slice(0, ITEMS_PER_PAGE);
+
+                // Calculate Total Pages
+                const totalPages = Math.ceil(channels.length / ITEMS_PER_PAGE);
+                const selectPlaceholder = `Choose a channel (Page 1/${totalPages})`;
 
                 const select = new StringSelectMenuBuilder()
                     .setCustomId(`select_channel_task_${accountId}_${guildId}`)
-                    .setPlaceholder('Choose a channel...')
+                    .setPlaceholder(selectPlaceholder)
                     .addOptions(
-                        topChannels.map((c: any) => new StringSelectMenuOptionBuilder()
+                        slicedChannels.map((c: any) => new StringSelectMenuOptionBuilder()
                             .setLabel(c.name.substring(0, 50))
                             .setValue(`${c.id}|${c.rateLimitPerUser}`)
                             .setDescription(`Slowmode: ${c.rateLimitPerUser}s`)
                         )
                     );
 
+                const buttons: ButtonBuilder[] = [];
+
+                if (channels.length > ITEMS_PER_PAGE) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(`btn_page_channel_${accountId}_${guildId}_1`) // Go to Page 1
+                            .setLabel('Next ➡️')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+                }
+
+                buttons.push(
+                    new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                );
+
                 await interaction.editReply({
                     content: `**Step 3: Select Channel**`,
                     components: [
                         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
-                        new ActionRowBuilder<ButtonBuilder>().addComponents(
-                            new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                        )
+                        new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
                     ]
                 });
 
@@ -103,6 +143,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
         }
 
         else if (customId.startsWith('select_channel_task_')) {
+            // ... (Existing Logic)
             const parts = customId.split('_');
             const accountId = parts[3];
             const guildId = parts[4];
@@ -144,6 +185,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
         }
 
         else if (customId === 'select_manage_task') {
+            // ... (Existing Logic)
             const taskId = interaction.values[0];
             await interaction.deferUpdate();
 
@@ -161,6 +203,15 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                 components: [panel.row, panel.editRow]
             });
         }
+
+        else if (customId === 'select_manage_account') {
+            const accountId = interaction.values[0];
+            await interaction.deferUpdate();
+            
+            const view = await renderAccountDetail(accountId);
+            await interaction.editReply({ ...view } as any);
+        }
+
     } catch (error) {
         Logger.error('Select Handler Error', error);
     }

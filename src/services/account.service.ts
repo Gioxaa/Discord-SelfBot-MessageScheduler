@@ -43,4 +43,14 @@ export class AccountService {
     static getDecryptedToken(account: any): string {
         return decrypt(account.token);
     }
+
+    static async delete(accountId: string) {
+        try {
+            await prisma.account.delete({ where: { id: accountId } });
+            Logger.info(`Account ${accountId} deleted`, 'AccountService');
+        } catch (error) {
+            Logger.error('Failed to delete account', error, 'AccountService');
+            throw error;
+        }
+    }
 }

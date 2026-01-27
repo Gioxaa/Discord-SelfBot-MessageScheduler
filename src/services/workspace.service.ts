@@ -90,21 +90,94 @@ export class WorkspaceService {
     });
 
     // 6. Send Dashboard Panel to Channel
-    await this.sendDashboard(channel, user.id); // Passing ID now as renderDashboard needs ID
+    await this.refreshControlPanel(client, user.id); 
     
     return channel;
   }
 
-  static async sendDashboard(channel: TextChannel, userId: string) {
+  static async refreshControlPanel(client: Client, userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.workspaceChannelId) return;
+
+    const channel = client.channels.cache.get(user.workspaceChannelId) as TextChannel;
+    if (!channel) return;
+
     const dashboard = await renderControlPanel(userId);
-    
-    // Safety check if dashboard is empty (shouldn't happen on new workspace usually, but good practice)
     const content = dashboard.content || `Welcome to your workspace!`;
-    
-    await channel.send({ 
+    const payload = { 
         content: content,
         embeds: dashboard.embeds, 
         components: dashboard.components 
-    });
+    };
+
+    try {
+        if (user.controlPanelMessageId) {
+            try {
+                const msg = await channel.messages.fetch(user.controlPanelMessageId);
+                if (msg) {
+                    await msg.edit(payload);
+                    return;
+                }
+            } catch (e) {
+                // Message likely deleted, send new one
+            }
+        } else {
+            // Smart Discovery: Try to find existing panel
+            try {
+                const messages = await channel.messages.fetch({ limit: 20 });
+                const existingPanel = messages.find(m => 
+                    m.author.id === client.user?.id && 
+                    m.embeds.length > 0 && 
+                    m.embeds[0].description?.includes('Control Panel')
+                );
+
+                if (existingPanel) {
+                    await existingPanel.edit(payload);
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: { controlPanelMessageId: existingPanel.id }
+                    });
+                    return;
+                }
+            } catch (e) {
+                // Ignore fetch error, proceed to send new
+            }
+        }
+        
+        // If no message or fetch failed, send new one
+        const newMsg = await channel.send(payload);
+        
+        await prisma.user.update({
+            where: { id: userId },
+            data: { controlPanelMessageId: newMsg.id }
+        });
+
+    } catch (e) {
+        console.error('[WorkspaceService] Failed to refresh panel', e);
+    }
+  }
+
+  // Legacy wrapper if needed, but better to use refreshControlPanel directly
+  static async sendDashboard(channel: TextChannel, userId: string) {
+     // Replaced by refreshControlPanel logic to track ID, but kept for compatibility if called elsewhere
+     // We can just call the new logic assuming we have client access, but here we only have channel.
+     // Let's try to get client from channel.client
+     await this.refreshControlPanel(channel.client as Client, userId);
+  }
+
+  static async syncPanelsOnStartup(client: Client) {
+      console.log('[WorkspaceService] Syncing control panels...');
+      const users = await prisma.user.findMany({
+          where: {
+              workspaceChannelId: { not: null }
+          }
+      });
+
+      for (const user of users) {
+          await this.refreshControlPanel(client, user.id);
+          // Small delay to avoid rate limits
+          await new Promise(r => setTimeout(r, 1000));
+      }
+      console.log(`[WorkspaceService] Synced panels for ${users.length} users.`);
   }
 }

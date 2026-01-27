@@ -155,36 +155,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                 dynamicDelay: isAuto
             });
 
-            // Auto-trigger Preview
-            try {
-                const account = await AccountService.getById(accountId);
-                if (account) {
-                    const token = decrypt(account.token);
-                    const channel = interaction.channel;
-                    // Type 0 = GuildText
-                    if (channel && channel.type === 0) { 
-                        let thread = channel.threads.cache.find(t => t.name === 'preview-text');
-                        if (!thread) {
-                            thread = await channel.threads.create({
-                                name: 'preview-text',
-                                autoArchiveDuration: 60,
-                                reason: 'Selfbot Preview Thread',
-                                type: 11 // PublicThread
-                            });
-                        }
-                        const invite = await channel.createInvite({
-                            maxUses: 1,
-                            unique: true,
-                            maxAge: 300,
-                            reason: 'Selfbot Preview Auto-Join'
-                        });
-                        await WorkerService.sendPreview(token, thread.id, invite.code, message);
-                        warningMsg += `\n> *Preview sent to <#${thread.id}>*`;
-                    }
-                }
-            } catch (e) {
-                Logger.warn('Auto-preview failed', (e as any).message);
-            }
+            // Auto-preview removed as per user request to prevent "running" feel
 
             const panel = renderTaskPanel(newTaskAuto);
             await interaction.editReply({ 
@@ -216,7 +187,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
             // Restart Worker if running
             const taskMsg = await TaskService.getById(taskId);
             if (taskMsg && taskMsg.status === 'RUNNING') {
-                await WorkerService.stopTask(taskId);
+                await WorkerService.stopTask(interaction.client, taskId);
                 await WorkerService.startTask(interaction.client, taskId);
             }
 
@@ -250,7 +221,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
             // Restart Worker if running
             const taskDelay = await TaskService.getById(taskId);
             if (taskDelay && taskDelay.status === 'RUNNING') {
-                await WorkerService.stopTask(taskId);
+                await WorkerService.stopTask(interaction.client, taskId);
                 await WorkerService.startTask(interaction.client, taskId);
             }
 

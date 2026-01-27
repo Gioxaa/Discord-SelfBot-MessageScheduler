@@ -28,6 +28,13 @@ export function renderTaskPanel(task: any) {
 
     const row = new ActionRowBuilder<ButtonBuilder>();
     
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId('btn_back_menu')
+            .setLabel('⬅️ Back to Menu')
+            .setStyle(ButtonStyle.Secondary)
+    );
+    
     if (status === 'RUNNING') {
         row.addComponents(
             new ButtonBuilder()

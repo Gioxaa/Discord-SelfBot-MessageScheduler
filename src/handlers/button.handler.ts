@@ -5,9 +5,15 @@ import { AccountService } from '../services/account.service';
 import { TaskService } from '../services/task.service';
 import { renderDashboard } from '../views/dashboard.view';
 import { renderTaskPanel } from '../views/task.view';
+import { renderControlPanel } from '../views/controlPanel.view';
 import { Logger } from '../utils/logger';
 import { validateOwnership } from '../utils/interactionGuard';
 import { decrypt } from '../utils/security';
+import { renderPaymentInvoice } from '../views/payment.view';
+import { PRODUCTS } from '../config';
+import { renderAccountList, renderAccountDetail } from '../views/account.view';
+import { validateToken } from '../utils/discordHelper';
+import prisma from '../database/client';
 
 export async function handleButton(interaction: ButtonInteraction) {
     // Security Check
@@ -21,14 +27,330 @@ export async function handleButton(interaction: ButtonInteraction) {
             const productId = customId.replace('btn_buy_', '');
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+            const product = PRODUCTS[productId];
+            if (!product) {
+                await interaction.editReply({ content: '❌ Invalid Product.' });
+                return;
+            }
+
             try {
-                const { url } = await PaymentService.createTransaction(interaction.user, productId);
-                await interaction.editReply({
-                    content: `✅ **Transaction Created!**\n[Click here to pay](${url})`
-                });
+                const { url, transactionId } = await PaymentService.createTransaction(interaction.user, productId);
+
+                // Render Invoice Embed
+                const invoiceView = renderPaymentInvoice(product.name, product.price, url, transactionId);
+
+                // Send to DM
+                try {
+                    const dmMsg = await interaction.user.send({ embeds: invoiceView.embeds, components: invoiceView.components });
+
+                    // Save Invoice Message ID
+                    await prisma.payment.update({
+                        where: { id: transactionId },
+                        data: { invoiceMessageId: dmMsg.id }
+                    });
+
+                    await interaction.editReply({
+                        content: `✅ **Invoice Created!**\nPlease check your **Direct Messages (DM)** for the QRIS and payment instructions.`
+                    });
+                } catch (dmError) {
+                    await interaction.editReply({
+                        content: `❌ **Could not send DM!**\nPlease open your DMs (Privacy Settings) and try again.\n\nHere is your link manually: [Pay Here](${url})`
+                    });
+                }
+
             } catch (e: any) {
+                // If pending error, offer Cancel button
+                if (e.message.includes('pending transaction') || e.message.includes('Please pay or cancel')) {
+                    const pending = await prisma.payment.findFirst({
+                        where: { userId: interaction.user.id, status: 'PENDING' }
+                    });
+
+                    if (pending) {
+                        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`btn_cancel_payment_${pending.id}`)
+                                .setLabel('Cancel Pending Transaction')
+                                .setStyle(ButtonStyle.Danger)
+                                .setEmoji('🗑️')
+                        );
+                        await interaction.editReply({ content: `❌ ${e.message}`, components: [row] });
+                        return;
+                    }
+                }
                 await interaction.editReply({ content: `❌ Payment Error: ${e.message}` });
             }
+        }
+
+        else if (customId.startsWith('btn_check_payment_')) {
+            const trxId = customId.replace('btn_check_payment_', '');
+            await interaction.deferUpdate();
+
+            try {
+                const status = await PaymentService.checkTransactionStatus(trxId, interaction.client);
+
+                if (status === 'PAID') {
+                    // Update Invoice to Success
+                    const oldEmbed = interaction.message.embeds[0];
+                    const newEmbed = EmbedBuilder.from(oldEmbed)
+                        .setColor(0x57F287) // Green
+                        .setAuthor({ name: 'FREY PAYMENT' })
+                        .setTitle('PAYMENT SUCCESSFUL ✅')
+                        .setDescription('Thank you! Your subscription has been activated.\nCheck your Control Panel.');
+
+                    await interaction.editReply({
+                        content: '',
+                        embeds: [newEmbed],
+                        components: [] // Remove buttons
+                    });
+                } else if (status === 'CANCELLED') {
+                    await interaction.followUp({ content: 'Transaction was cancelled.', ephemeral: true });
+                } else {
+                    await interaction.followUp({ content: 'Status: PENDING. Please complete payment or wait a moment.', ephemeral: true });
+                }
+            } catch (e: any) {
+                await interaction.followUp({ content: `Check Failed: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        else if (customId.startsWith('btn_cancel_payment_')) {
+            const trxId = customId.replace('btn_cancel_payment_', '');
+            await interaction.deferUpdate();
+
+            try {
+                // Get transaction before cancelling to get invoiceMessageId
+                const transactionToCancel = await prisma.payment.findUnique({ where: { id: trxId } });
+
+                await PaymentService.cancelTransaction(trxId);
+
+                // Update Embed to show Cancelled
+                const oldEmbed = interaction.message.embeds[0];
+                const newEmbed = EmbedBuilder.from(oldEmbed)
+                    .setColor(0xED4245) // Red
+                    // .setTitle('TRANSACTION CANCELLED')
+                    .setDescription('*This transaction has been cancelled by the user.*')
+                    .setImage(null); // Remove QR Code
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [newEmbed],
+                    components: [] // Remove buttons
+                });
+
+                // ALSO Edit the DM Invoice if it exists and is different from current interaction message
+                if (transactionToCancel?.invoiceMessageId && interaction.message.id !== transactionToCancel.invoiceMessageId) {
+                    try {
+                        const dmChannel = await interaction.user.createDM();
+                        const invoiceMsg = await dmChannel.messages.fetch(transactionToCancel.invoiceMessageId);
+                        if (invoiceMsg) {
+                            await invoiceMsg.edit({
+                                embeds: [newEmbed],
+                                components: []
+                            });
+                        }
+                    } catch (ignore) { /* Message might be deleted */ }
+                }
+
+            } catch (e: any) {
+                await interaction.followUp({ content: `Failed to cancel: ${e.message}`, ephemeral: true });
+            }
+        }
+
+        else if (customId === 'btn_manage_accounts') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            const view = await renderAccountList(interaction.user.id);
+            await interaction.editReply({ ...view } as any);
+        }
+
+        else if (customId === 'btn_account_back') {
+            await interaction.deferUpdate();
+            const view = await renderAccountList(interaction.user.id);
+            await interaction.editReply({ ...view } as any);
+        }
+
+        else if (customId.startsWith('btn_check_account_')) {
+            const accountId = customId.replace('btn_check_account_', '');
+            await interaction.deferUpdate();
+
+            const account = await AccountService.getById(accountId);
+            if (!account) {
+                await interaction.editReply({ content: '❌ Account not found.' });
+                return;
+            }
+
+            const token = AccountService.getDecryptedToken(account);
+            const discordUser = await validateToken(token);
+
+            const view = await renderAccountDetail(accountId, {
+                isValid: !!discordUser,
+                username: discordUser?.username
+            });
+
+            await interaction.editReply({ ...view } as any);
+        }
+
+        else if (customId.startsWith('btn_delete_account_')) {
+            const accountId = customId.replace('btn_delete_account_', '');
+            await interaction.deferUpdate();
+
+            await AccountService.delete(accountId);
+
+            // Go back to list
+            const view = await renderAccountList(interaction.user.id);
+            await interaction.editReply({
+                content: '✅ **Account Deleted.**',
+                embeds: view.embeds,
+                components: view.components
+            } as any);
+        }
+
+        else if (customId.startsWith('btn_page_guild_')) {
+            // Format: btn_page_guild_{accountId}_{page}
+            const parts = customId.split('_');
+            const accountId = parts[3];
+            const page = parseInt(parts[4]);
+
+            await interaction.deferUpdate();
+
+            const account = await AccountService.getById(accountId);
+            if (!account) return;
+
+            const token = AccountService.getDecryptedToken(account);
+            const guilds = await WorkerService.fetchGuilds(token);
+
+            const ITEMS_PER_PAGE = 25;
+            const start = page * ITEMS_PER_PAGE;
+            const end = start + ITEMS_PER_PAGE;
+            const slicedGuilds = guilds.slice(start, end);
+
+            const select = new StringSelectMenuBuilder()
+                .setCustomId(`select_guild_task_${accountId}`)
+                .setPlaceholder(`Select a server (Page ${page + 1})`)
+                .addOptions(
+                    slicedGuilds.map((g: any) => ({
+                        label: g.name.substring(0, 100),
+                        value: g.id,
+                        description: `ID: ${g.id}`
+                    }))
+                );
+
+            const buttons: ButtonBuilder[] = [];
+
+            // Prev Button
+            if (page > 0) {
+                buttons.push(
+                    new ButtonBuilder()
+                        .setCustomId(`btn_page_guild_${accountId}_${page - 1}`)
+                        .setLabel('⬅️ Prev')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            // Next Button
+            if (end < guilds.length) {
+                buttons.push(
+                    new ButtonBuilder()
+                        .setCustomId(`btn_page_guild_${accountId}_${page + 1}`)
+                        .setLabel('Next ➡️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            // Always add Cancel/Search
+            buttons.push(
+                new ButtonBuilder().setCustomId(`btn_search_guild_${accountId}`).setLabel('Search').setStyle(ButtonStyle.Primary).setEmoji('🔍'),
+                new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+            );
+
+            // Calculate Total Pages
+            const totalPages = Math.ceil(guilds.length / ITEMS_PER_PAGE);
+            const selectPlaceholder = `Select a server (Page ${page + 1}/${totalPages})`;
+
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`select_guild_task_${accountId}`)
+                .setPlaceholder(selectPlaceholder)
+                .addOptions(
+                    slicedGuilds.map((g: any) => ({
+                        label: g.name.substring(0, 100),
+                        value: g.id,
+                        description: `ID: ${g.id}`
+                    }))
+                );
+
+            await interaction.editReply({
+                components: [
+                    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
+                    new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
+                ]
+            });
+        }
+
+        else if (customId.startsWith('btn_page_channel_')) {
+            // Format: btn_page_channel_{accountId}_{guildId}_{page}
+            const parts = customId.split('_');
+            const accountId = parts[3];
+            const guildId = parts[4];
+            const page = parseInt(parts[5]);
+
+            await interaction.deferUpdate();
+
+            const account = await AccountService.getById(accountId);
+            if (!account) return;
+
+            const token = AccountService.getDecryptedToken(account);
+            const channels = await WorkerService.fetchChannels(token, guildId);
+
+            const ITEMS_PER_PAGE = 25;
+            const start = page * ITEMS_PER_PAGE;
+            const end = start + ITEMS_PER_PAGE;
+            const slicedChannels = channels.slice(start, end);
+
+            // Calculate Total Pages
+            const totalPages = Math.ceil(channels.length / ITEMS_PER_PAGE);
+            const selectPlaceholder = `Choose a channel (Page ${page + 1}/${totalPages})`;
+
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`select_channel_task_${accountId}_${guildId}`)
+                .setPlaceholder(selectPlaceholder)
+                .addOptions(
+                    slicedChannels.map((c: any) => ({
+                        label: c.name.substring(0, 50),
+                        value: `${c.id}|${c.rateLimitPerUser}`,
+                        description: `Slowmode: ${c.rateLimitPerUser}s`
+                    }))
+                );
+
+            const buttons: ButtonBuilder[] = [];
+
+            // Prev Button
+            if (page > 0) {
+                buttons.push(
+                    new ButtonBuilder()
+                        .setCustomId(`btn_page_channel_${accountId}_${guildId}_${page - 1}`)
+                        .setLabel('⬅️ Prev')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            // Next Button
+            if (end < channels.length) {
+                buttons.push(
+                    new ButtonBuilder()
+                        .setCustomId(`btn_page_channel_${accountId}_${guildId}_${page + 1}`)
+                        .setLabel('Next ➡️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            buttons.push(
+                new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+            );
+
+            await interaction.editReply({
+                components: [
+                    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
+                    new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
+                ]
+            });
         }
 
         else if (customId === 'btn_add_account') {
@@ -57,13 +379,13 @@ export async function handleButton(interaction: ButtonInteraction) {
         }
 
         else if (customId === 'btn_setup_task') {
-            // Defer immediately to prevent timeout if DB is slow
+            // New Ephemeral Context (Hybrid SPA)
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
             const accounts = await AccountService.getByUserId(interaction.user.id);
-            
+
             if (accounts.length === 0) {
-                await interaction.editReply({ content: '❌ No accounts found.' });
+                await interaction.editReply({ content: '❌ No accounts found. Please add an account first.', components: [], embeds: [] });
                 return;
             }
 
@@ -79,6 +401,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             await interaction.editReply({
                 content: `**Step 1: Select Account**`,
+                embeds: [],
                 components: [
                     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
                     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -88,12 +411,19 @@ export async function handleButton(interaction: ButtonInteraction) {
             });
         }
 
-        else if (customId === 'btn_cancel_setup') {
-            await interaction.deferUpdate(); // Defer update for setup cancellation
+        else if (customId === 'btn_cancel_setup' || customId === 'btn_back_menu') {
+            await interaction.deferUpdate();
+            // Since we are now in an ephemeral context, "Back to Menu" doesn't make sense to go to Control Panel
+            // because Control Panel is the public message.
+            // Instead, we should probably delete this ephemeral message or show a "Done" message.
+            // But if the user wants to go back to the list of tasks (Dashboard) inside this ephemeral window, we can do that.
+
+            // However, consistent with the request "Only you can see this", let's render the Dashboard HERE.
+            const dashboard = await renderDashboard(interaction.user.id);
             await interaction.editReply({
-                content: '❌ **Setup Cancelled**',
-                embeds: [],
-                components: []
+                content: dashboard.content || '',
+                embeds: dashboard.embeds,
+                components: dashboard.components
             });
         }
 
@@ -108,17 +438,17 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             await interaction.editReply({ content: `Stopping ${runningTasks.length} tasks...` });
 
-            let stoppedCount = 0;
-            for (const task of runningTasks) {
-                await WorkerService.stopTask(task.id);
-                stoppedCount++;
-            }
+            // Optimized: Stop all in parallel
+            await Promise.all(runningTasks.map(task =>
+                WorkerService.stopTask(interaction.client, task.id)
+            ));
 
-            await interaction.editReply({ content: `✅ **Stopped ${stoppedCount} tasks.**` });
+            await interaction.editReply({ content: `✅ **Stopped ${runningTasks.length} tasks.**` });
         }
 
         else if (customId === 'btn_view_tasks') {
-            await interaction.deferReply({ flags: MessageFlags.Ephemeral }); // Defer since fetching tasks takes time
+            // New Ephemeral Context (Hybrid SPA)
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const dashboard = await renderDashboard(interaction.user.id);
             await interaction.editReply({
                 ...dashboard
@@ -130,8 +460,8 @@ export async function handleButton(interaction: ButtonInteraction) {
             const taskId = customId.replace('btn_stop_task_', '');
             await interaction.deferUpdate(); // Defer update immediately
 
-            await WorkerService.stopTask(taskId);
-            
+            await WorkerService.stopTask(interaction.client, taskId);
+
             const updatedTask = await TaskService.getById(taskId);
             if (updatedTask) {
                 const panel = renderTaskPanel(updatedTask);
@@ -157,7 +487,7 @@ export async function handleButton(interaction: ButtonInteraction) {
         else if (customId.startsWith('btn_delete_task_')) {
             const taskId = customId.replace('btn_delete_task_', '');
             await interaction.deferUpdate(); // Defer update immediately
-            await WorkerService.stopTask(taskId); 
+            await WorkerService.stopTask(interaction.client, taskId);
             await TaskService.delete(taskId);
             await interaction.editReply({ content: `🗑️ Task deleted.`, embeds: [], components: [] });
         }
@@ -253,7 +583,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                     .setDescription(`> **Status:** Sending message...\n> **Destination:** <#${thread.id}>\n\nCheck the thread to see the exact rendering with emojis.`)
                     .setColor(0x57F287);
 
-                await interaction.editReply({ 
+                await interaction.editReply({
                     content: '',
                     embeds: [embed]
                 });
@@ -265,14 +595,14 @@ export async function handleButton(interaction: ButtonInteraction) {
         }
 
         else if (customId === 'btn_search_guild_') {
-             // ... legacy check
+            // ... legacy check
         }
         else if (customId.startsWith('btn_search_guild_')) {
             const accountId = customId.replace('btn_search_guild_', '');
             const modal = new ModalBuilder()
                 .setCustomId(`modal_search_guild_${accountId}`)
                 .setTitle('Search Server');
-            
+
             const input = new TextInputBuilder()
                 .setCustomId('search_query')
                 .setLabel('Server Name')

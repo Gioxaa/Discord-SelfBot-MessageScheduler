@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @map("_id") // Discord User ID (Custom String ID)
+  username          String?
+  balance           Int       @default(0)
+  expiryDate        DateTime?
+  
+  workspaceChannelId String?
+  logThreadId        String?
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  accounts          Account[]
+  payments          Payment[]
+}
+
+model Account {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String
+  name        String?
+  avatar      String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  tasks       Task[]
+}
+
+model Task {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  accountId     String   @db.ObjectId
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  guildId       String
+  guildName     String?  // New: Store Server Name
+  channelId     String
+  channelName   String?  // New: Store Channel Name
+  channelSlowmode Int?   // New: Store Slowmode
+  message       String
+  
+  minDelay      Int
+  maxDelay      Int
+  dynamicDelay  Boolean  @default(true)
+  
+  status        String   @default("STOPPED")
+  
+  totalSent     Int      @default(0)
+  lastRun       DateTime?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Payment {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  externalId  String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  amount      Int
+  status      String
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

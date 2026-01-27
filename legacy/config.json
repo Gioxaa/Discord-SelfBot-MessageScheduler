@@ -1,0 +1,23 @@
+{
+    "webhook": "",
+    "accounts": [
+        {
+            "_akun": "just ignore this, this is not functionable",
+            "token": "", 
+            "guild": "",
+            "channel": "",
+            "mindelay": 0,
+            "maxdelay": 0,
+            "message": []
+        },
+        {
+            "_akun": "just ignore this, this is not functionable",
+            "token": "", 
+            "guild": "",
+            "channel": "",
+            "mindelay": 0,
+            "maxdelay": 0, 
+            "message": []
+        }
+    ]
+}

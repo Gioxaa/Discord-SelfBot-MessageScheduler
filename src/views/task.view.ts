@@ -1,7 +1,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 
-export function renderTaskPanel(task: any) {
-    const status = task.status;
+export function renderTaskPanel(task: any, overrideStatus?: string) {
+    const status = overrideStatus || task.status;
     
     // Sanitize Inputs
     const accountName = (task.account && task.account.name) ? task.account.name : 'Unknown Account';
@@ -15,7 +15,9 @@ export function renderTaskPanel(task: any) {
     }
     if (!msgPreview) msgPreview = '(No Content)';
 
-    const statusIcon = status === 'RUNNING' ? '<a:on:1306062154616537109>' : '<a:offline:1306203222263988285>';
+    let statusIcon = '<a:offline:1306203222263988285>';
+    if (status === 'RUNNING') statusIcon = '<a:on:1306062154616537109>';
+    else if (status === 'PROCESSING') statusIcon = '<a:loading_gif:1306062016611614741>';
 
     const embed = new EmbedBuilder()
         .setDescription(`
@@ -55,6 +57,14 @@ ${msgPreview}
                 .setCustomId(`btn_stop_task_${task.id}`)
                 .setLabel('Stop Process')
                 .setStyle(ButtonStyle.Danger)
+        );
+    } else if (status === 'PROCESSING') {
+         row.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`btn_processing_${task.id}`)
+                .setLabel('Processing...')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(true)
         );
     } else {
         row.addComponents(

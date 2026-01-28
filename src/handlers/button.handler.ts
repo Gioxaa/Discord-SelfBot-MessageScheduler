@@ -473,15 +473,41 @@ export async function handleButton(interaction: ButtonInteraction) {
         else if (customId.startsWith('btn_resume_task_')) {
             const taskId = customId.replace('btn_resume_task_', '');
             await interaction.deferUpdate(); // Defer update immediately
+
+            // 1. Instant Feedback: Set to PROCESSING
             try {
+                const initialTask = await TaskService.getById(taskId);
+                if (initialTask) {
+                    const loadingPanel = renderTaskPanel(initialTask, 'PROCESSING');
+                    await interaction.editReply({ 
+                        embeds: [loadingPanel.embed], 
+                        components: [loadingPanel.row, loadingPanel.editRow] 
+                    });
+                }
+
+                // 2. Start Worker (Heavy Operation)
                 await WorkerService.startTask(interaction.client, taskId);
+
+                // 3. Success: Update to RUNNING
                 const updatedTask = await TaskService.getById(taskId);
                 if (updatedTask) {
-                    const panel = renderTaskPanel(updatedTask);
-                    await interaction.editReply({ embeds: [panel.embed], components: [panel.row, panel.editRow] });
+                    const panel = renderTaskPanel(updatedTask); // Will show RUNNING
+                    await interaction.editReply({ 
+                        embeds: [panel.embed], 
+                        components: [panel.row, panel.editRow] 
+                    });
                 }
             } catch (e: any) {
-                await interaction.followUp({ content: `Error: ${e.message}`, flags: MessageFlags.Ephemeral });
+                // 4. Failed: Revert to STOPPED (or previous state) and show error
+                const failedTask = await TaskService.getById(taskId);
+                if (failedTask) {
+                    const panel = renderTaskPanel(failedTask); // Revert UI
+                    await interaction.editReply({ 
+                        embeds: [panel.embed], 
+                        components: [panel.row, panel.editRow] 
+                    });
+                }
+                await interaction.followUp({ content: `❌ Start Failed: ${e.message}`, flags: MessageFlags.Ephemeral });
             }
         }
         else if (customId.startsWith('btn_delete_task_')) {

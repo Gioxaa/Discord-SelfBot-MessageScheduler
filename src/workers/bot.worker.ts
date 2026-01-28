@@ -202,52 +202,7 @@ async function runPreview() {
     }
 }
 
-async function messageLoop(channel: any) {
-  if (!isRunning) return;
-  try {
-    let delay = getRandomDelay(payload.minDelay || 60000, payload.maxDelay || 120000);
-    if (payload.dynamicDelay && channel.rateLimitPerUser) {
-      const slowmodeMs = channel.rateLimitPerUser * 1000;
-      if (delay < slowmodeMs) {
-        const jitter = 2000 + Math.floor(Math.random() * 3000); 
-        delay = slowmodeMs + jitter; 
-        log(`[Info] Adjusted delay: ${delay}ms`);
-      }
-    }
-
-    if (payload.message) {
-        const chunks = smartSplit(payload.message);
-        for (const chunk of chunks) {
-            const typingDuration = Math.min(chunk.length * 50, 10000); 
-            if (channel.sendTyping) {
-                await channel.sendTyping();
-                await new Promise(resolve => setTimeout(resolve, typingDuration));
-            }
-            const sentMsg = await channel.send(chunk);
-            if (parentPort && chunk === chunks[chunks.length - 1]) {
-                parentPort.postMessage({
-                    type: 'log',
-                    status: 'success',
-                    content: `Sent to #${channel.name}`,
-                    url: sentMsg.url,
-                    nextDelay: delay
-                });
-            }
-            if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
-        }
-    }
-    setTimeout(() => messageLoop(channel), delay);
-  } catch (err: any) {
-    if (err.code === 429) {
-        const retryAfter = err.retryAfter || 5000;
-        error(`[Rate Limit] Hit limit. Waiting ${retryAfter}ms...`);
-        setTimeout(() => messageLoop(channel), retryAfter + 1000);
-        return;
-    }
-    error(`Failed to send: ${err.message}`);
-    setTimeout(() => messageLoop(channel), 20000); 
-  }
-}
+// --- HELPER FUNCTIONS ---
 
 function getRandomDelay(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -263,15 +218,151 @@ function error(msg: string) {
   else console.error(msg);
 }
 
-// Handle Shutdown
+// --- MULTI-TASK LOGIC ---
+
+// Active Tasks Registry
+const activeTasks = new Map<string, { timeout: NodeJS.Timeout | null, config: any }>();
+
+// Handle Parent Messages
 if (parentPort) {
-    parentPort.on('message', (msg) => {
+    parentPort.on('message', async (msg) => {
         if (msg === 'STOP') {
             isRunning = false;
+            // Clear all tasks
+            for (const [id, task] of activeTasks) {
+                if (task.timeout) clearTimeout(task.timeout);
+            }
+            activeTasks.clear();
             client.destroy();
             process.exit(0);
         }
+        else if (msg.type === 'START_TASK') {
+            const { taskId, config } = msg;
+            if (activeTasks.has(taskId)) {
+                stopTask(taskId); // Restart if exists
+            }
+            
+            log(`[Worker] Starting Task ${taskId} on #${config.channelId}`);
+            
+            activeTasks.set(taskId, { timeout: null, config });
+            
+            // Start Loop
+            processTask(taskId);
+        }
+        else if (msg.type === 'STOP_TASK') {
+            stopTask(msg.taskId);
+        }
     });
+}
+
+function stopTask(taskId: string) {
+    const task = activeTasks.get(taskId);
+    if (task) {
+        if (task.timeout) clearTimeout(task.timeout);
+        activeTasks.delete(taskId);
+        log(`[Worker] Stopped Task ${taskId}`);
+    }
+}
+
+async function processTask(taskId: string) {
+    const task = activeTasks.get(taskId);
+    if (!task) return;
+
+    const { config } = task;
+    let channel: any = client.channels.cache.get(config.channelId);
+
+    // Try fetching if not in cache (First time)
+    if (!channel) {
+        try {
+            channel = await client.channels.fetch(config.channelId);
+        } catch (e) {
+            error(`[Task ${taskId}] Channel not found: ${config.channelId}`);
+            // Retry later or stop? Let's retry in 30s
+            task.timeout = setTimeout(() => processTask(taskId), 30000);
+            return;
+        }
+    }
+
+    if (!channel || !channel.isText()) {
+        error(`[Task ${taskId}] Invalid Channel or Not Found. Retrying in 30s...`);
+        // Retry instead of dying
+        task.timeout = setTimeout(() => processTask(taskId), 30000);
+        return; 
+    }
+
+    // Metadata Self-Healing
+    if (parentPort && (channel.type === 'GUILD_TEXT' || channel.type === 'GUILD_NEWS' || channel.isThread())) {
+        try {
+           const guildName = (channel as any).guild?.name || 'Unknown Server';
+           const channelName = (channel as any).name || 'Unknown Channel';
+           parentPort.postMessage({ 
+               type: 'metadata',
+               taskId, // Include taskId
+               data: { guildName, channelName } 
+           });
+        } catch (e) { }
+    }
+
+    try {
+        let delay = getRandomDelay(config.minDelay || 60000, config.maxDelay || 120000);
+        
+        // Dynamic Delay Logic
+        if (config.dynamicDelay && channel.rateLimitPerUser) {
+            const slowmodeMs = channel.rateLimitPerUser * 1000;
+            if (delay < slowmodeMs) {
+                const jitter = 2000 + Math.floor(Math.random() * 3000); 
+                delay = slowmodeMs + jitter; 
+            }
+        }
+
+        if (config.message) {
+            const chunks = smartSplit(config.message);
+            for (const chunk of chunks) {
+                const typingDuration = Math.min(chunk.length * 50, 10000); 
+                if (channel.sendTyping) {
+                    await channel.sendTyping();
+                    await new Promise(resolve => setTimeout(resolve, typingDuration));
+                }
+                
+                // Check if still running before sending
+                if (!activeTasks.has(taskId)) return;
+
+                const sentMsg = await channel.send(chunk);
+                
+                if (parentPort && chunk === chunks[chunks.length - 1]) {
+                    parentPort.postMessage({
+                        type: 'log',
+                        taskId, // Include taskId
+                        status: 'success',
+                        content: `Sent to #${channel.name}`,
+                        url: sentMsg.url,
+                        nextDelay: delay
+                    });
+                }
+                if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+        
+        // Schedule Next
+        if (activeTasks.has(taskId)) {
+            task.timeout = setTimeout(() => processTask(taskId), delay);
+        }
+
+    } catch (err: any) {
+        if (err.code === 429) {
+            const retryAfter = err.retryAfter || 5000;
+            error(`[Task ${taskId}] Rate Limit. Waiting ${retryAfter}ms...`);
+            if (activeTasks.has(taskId)) {
+                task.timeout = setTimeout(() => processTask(taskId), retryAfter + 1000);
+            }
+            return;
+        }
+        error(`[Task ${taskId}] Failed to send: ${err.message}`);
+        // Retry delay on error
+        if (activeTasks.has(taskId)) {
+            task.timeout = setTimeout(() => processTask(taskId), 20000); 
+        }
+    }
 }
 
 // MAIN EXECUTION
@@ -286,39 +377,12 @@ client.on('ready', async () => {
       await fetchContext();
   } else if (mode === 'PREVIEW') {
       await runPreview();
-  } else {
-      if (!payload.channelId) {
-          error('Channel ID required for RUN mode');
-          process.exit(1);
-      }
-      
-      let channel;
-      try {
-          channel = await client.channels.fetch(payload.channelId);
-      } catch (e) {
-         // channel undefined
-      }
-
-      if (!channel || !channel.isText()) {
-        error('Invalid Channel or No Access');
-        process.exit(1);
-      }
-
-      // Metadata Self-Healing
-      if (parentPort && (channel.type === 'GUILD_TEXT' || channel.type === 'GUILD_NEWS' || channel.isThread())) {
-        try {
-           const guildName = (channel as any).guild?.name || 'Unknown Server';
-           const channelName = (channel as any).name || 'Unknown Channel';
-           parentPort.postMessage({ 
-               type: 'metadata', 
-               data: { guildName, channelName } 
-           });
-        } catch (e) { /* ignore metadata errors */ }
-      }
-
-      messageLoop(channel);
+  } else if (mode === 'RUN') {
+      log('[Worker] Ready for tasks. Waiting for commands...');
+      if (parentPort) parentPort.postMessage('READY');
   }
 });
+
 
 client.login(payload.token).catch(err => {
     error(`Login Failed: ${err.message}`);

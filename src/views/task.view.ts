@@ -18,13 +18,16 @@ export function renderTaskPanel(task: any, overrideStatus?: string) {
     let statusIcon = '<a:offline:1306203222263988285>';
     if (status === 'RUNNING') statusIcon = '<a:on:1306062154616537109>';
     else if (status === 'PROCESSING') statusIcon = '<a:loading_gif:1306062016611614741>';
+    else if (status === 'SUBSCRIPTION_EXPIRED') statusIcon = '❌';
+
+    const displayStatus = status === 'SUBSCRIPTION_EXPIRED' ? 'SUBSCRIPTION EXPIRED' : status;
 
     const embed = new EmbedBuilder()
         .setDescription(`
 ## <a:GREEN_CROWN:1306056562435035190> **TASK CONFIGURATION** <a:GREEN_CROWN:1306056562435035190>
 \u200b
 **PROCESS STATUS**
-<a:arrow:1306059259615903826> Status  : ${statusIcon} **${status}**
+<a:arrow:1306059259615903826> Status  : ${statusIcon} **${displayStatus}**
 <a:arrow:1306059259615903826> Account : **${accountName}**
 
 **TARGET & TIMING**

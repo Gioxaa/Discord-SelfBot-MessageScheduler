@@ -1,6 +1,7 @@
 import prisma from '../database/client';
 import { encrypt, decrypt } from '../utils/security';
 import { Logger } from '../utils/logger';
+import { WorkerService } from './worker.service';
 
 export class AccountService {
     static async create(userId: string, name: string, token: string, avatar: string) {
@@ -46,6 +47,9 @@ export class AccountService {
 
     static async delete(accountId: string) {
         try {
+            // Ensure worker is killed before deletion
+            await WorkerService.terminateAccount(accountId);
+            
             await prisma.account.delete({ where: { id: accountId } });
             Logger.info(`Account ${accountId} deleted`, 'AccountService');
         } catch (error) {

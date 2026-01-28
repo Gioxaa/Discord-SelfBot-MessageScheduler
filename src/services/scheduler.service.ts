@@ -76,7 +76,7 @@ export class SchedulerService {
                     try {
                         const expiryStr = task.account.user.expiryDate ? new Date(task.account.user.expiryDate).toLocaleString('id-ID') : 'Unknown';
                         Logger.info(`[Scheduler] Stopping Task ${task.id} (User ${task.account.user.username} expired at ${expiryStr})`, 'SchedulerService');
-                        await WorkerService.stopTask(client, task.id);
+                        await WorkerService.stopTask(client, task.id, 'Subscription Expired');
                         // stopTask automatically refreshes the panel, so we get visual update for free here.
                     } catch (err) {
                         Logger.error(`[Scheduler] Failed to stop task ${task.id}`, err, 'SchedulerService');

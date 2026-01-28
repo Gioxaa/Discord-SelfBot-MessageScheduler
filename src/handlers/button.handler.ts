@@ -7,11 +7,12 @@ import { renderDashboard } from '../views/dashboard.view';
 import { renderTaskPanel } from '../views/task.view';
 import { renderControlPanel } from '../views/controlPanel.view';
 import { Logger } from '../utils/logger';
-import { validateOwnership } from '../utils/interactionGuard';
+import { validateOwnership, validateActiveSubscription } from '../utils/interactionGuard';
 import { decrypt } from '../utils/security';
 import { renderPaymentInvoice } from '../views/payment.view';
 import { PRODUCTS } from '../config';
 import { renderAccountList, renderAccountDetail } from '../views/account.view';
+import { renderTerms } from '../views/store.view';
 import { validateToken } from '../utils/discordHelper';
 import prisma from '../database/client';
 
@@ -22,9 +23,57 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     const { customId } = interaction;
 
+    // Subscription Check for Task Management
+    if (['btn_setup_task', 'btn_stop_all', 'btn_stop_task_', 'btn_resume_task_', 'btn_edit_', 'btn_preview_task_', 'btn_delete_task_'].some(prefix => customId.startsWith(prefix))) {
+        const isActive = await validateActiveSubscription(interaction.user.id);
+        if (!isActive) {
+            // Attempt to update the embed if it's a task-specific button
+            if (customId.includes('_task_') && !customId.startsWith('btn_setup_') && !customId.startsWith('btn_stop_all')) {
+                const parts = customId.split('_');
+                const taskId = parts[parts.length - 1]; // Assumes ID is always last
+                
+                try {
+                    const task = await TaskService.getById(taskId);
+                    if (task) {
+                        const expiredPanel = renderTaskPanel(task, 'SUBSCRIPTION_EXPIRED');
+                        await interaction.update({ 
+                            embeds: [expiredPanel.embed], 
+                            components: [expiredPanel.row, expiredPanel.editRow] 
+                        });
+                        return;
+                    }
+                } catch (e) {
+                    // Fallback if task fetch fails
+                }
+            }
+
+            // Fallback for general buttons or errors
+            await interaction.reply({ content: '❌ **Subscription Expired**\nPlease renew your plan to continue using this feature.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+    }
+
     try {
-        if (customId.startsWith('btn_buy_')) {
+        if (customId === 'btn_view_terms') {
+            const view = renderTerms();
+            await interaction.reply({ ...view } as any);
+        }
+
+        // Step 1: Click "Buy" -> Show Terms & "I Understand" Button
+        else if (customId.startsWith('btn_buy_')) {
             const productId = customId.replace('btn_buy_', '');
+            // Show Terms with Product ID context
+            const view = renderTerms(productId);
+            await interaction.reply({ ...view } as any);
+        }
+
+        // Step 2: Click "I Understand" -> Process Payment
+        else if (customId.startsWith('btn_confirm_buy_')) {
+            const productId = customId.replace('btn_confirm_buy_', '');
+            
+            // Note: Since this is an interaction on an ephemeral message, we can't 'deferReply' again easily 
+            // if we want to send a NEW ephemeral message or edit. 
+            // But we want to send a DM. 'deferReply' works on button clicks.
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
             const product = PRODUCTS[productId];

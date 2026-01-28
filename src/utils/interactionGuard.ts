@@ -5,10 +5,10 @@ import { Logger } from './logger';
 export async function validateOwnership(interaction: Interaction): Promise<boolean> {
     if (!interaction.isRepliable()) return false;
 
-    // 1. Allow Public Interactions (Store/Buy Buttons)
+    // 1. Allow Public Interactions (Store/Buy Buttons, Terms)
     // We check customId if available (Buttons, Modals, Selects)
     const customId = (interaction as any).customId;
-    if (customId && customId.startsWith('btn_buy_')) {
+    if (customId && (customId.startsWith('btn_buy_') || customId === 'btn_view_terms')) {
         return true;
     }
 
@@ -48,6 +48,23 @@ export async function validateOwnership(interaction: Interaction): Promise<boole
 
     } catch (error) {
         Logger.error('Interaction Guard Error', error);
+        return false; // Fail safe
+    }
+}
+
+export async function validateActiveSubscription(userId: string): Promise<boolean> {
+    try {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) return false;
+        
+        // If expiryDate is present and in the past, return false (Expired)
+        if (user.expiryDate && new Date() > user.expiryDate) {
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        Logger.error('Subscription Validation Error', error);
         return false; // Fail safe
     }
 }

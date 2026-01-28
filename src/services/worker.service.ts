@@ -13,7 +13,7 @@ export class WorkerService {
     private static restartCounters = new Map<string, { count: number, lastReset: number }>(); // AccountID -> Restart Info
     private static MAX_WORKERS_PER_USER = 5;
     private static MAX_RESTARTS_PER_HOUR = 5;
-    private static IDLE_TIMEOUT_MS = 0 * 60 * 1000; // 5 Minutes Keep-Alive
+    private static IDLE_TIMEOUT_MS = 0 * 60 * 1000; // X Minutes Keep-Alive
 
     // Simple In-Memory Cache
     private static cache = new Map<string, { data: any, expires: number }>();
@@ -177,7 +177,7 @@ export class WorkerService {
         });
     }
 
-    static async stopTask(client: Client, taskId: string) {
+    static async stopTask(client: Client, taskId: string, reason?: string) {
         // Find which account owns this task
         const task = await prisma.task.findUnique({ where: { id: taskId }, include: { account: true } });
         if (!task) return;
@@ -190,6 +190,16 @@ export class WorkerService {
             where: { id: taskId },
             data: { status: 'STOPPED' }
         });
+
+        if (reason) {
+            // Send Notification Log
+            await this.forwardLog(client, task.account.userId, {
+                status: 'error', // Use error style for stops
+                content: `Task Stopped: ${reason}`,
+                url: null,
+                nextDelay: 0
+            });
+        }
 
         if (worker) {
             worker.postMessage({ type: 'STOP_TASK', taskId });
@@ -394,7 +404,7 @@ export class WorkerService {
             worker.postMessage('STOP');
             // Allow grace period then terminate
             setTimeout(() => worker.terminate(), 1000);
-
+            
             // Mark all tasks stopped
             await prisma.task.updateMany({
                 where: { accountId: id, status: 'RUNNING' },
@@ -405,6 +415,30 @@ export class WorkerService {
         this.activeAccountTasks.clear();
         this.idleTimers.forEach(t => clearTimeout(t));
         this.idleTimers.clear();
+    }
+
+    static async terminateAccount(accountId: string) {
+        console.log(`[WorkerService] Terminating worker for Account ${accountId}...`);
+        
+        // 1. Clear Idle Timer
+        if (this.idleTimers.has(accountId)) {
+            clearTimeout(this.idleTimers.get(accountId)!);
+            this.idleTimers.delete(accountId);
+        }
+
+        // 2. Stop Worker
+        const worker = this.workers.get(accountId);
+        if (worker) {
+            worker.postMessage('STOP');
+            setTimeout(() => worker.terminate(), 1000); // Force kill after 1s
+            this.workers.delete(accountId);
+        }
+
+        // 3. Clear Task Registry
+        this.activeAccountTasks.delete(accountId);
+        
+        // 4. Clear Pending Logins
+        this.pendingLogins.delete(accountId);
     }
 
     static async forwardLog(client: Client, userId: string, logData: any) {

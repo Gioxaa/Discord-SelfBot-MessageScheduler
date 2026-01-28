@@ -4,12 +4,17 @@ import { AdminService } from '../services/admin.service';
 import { config } from '../config';
 import { EmbedBuilder } from 'discord.js';
 import { renderStats } from '../views/stats.view';
+import { renderTutorialMenu } from '../views/tutorial.view';
 
 export const adminCommand: Command = {
     data: new SlashCommandBuilder()
         .setName('admin')
         .setDescription('Administrator Tools')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addSubcommand(sub => 
+            sub.setName('tutorial')
+               .setDescription('Deploy How-to-Get-Token Tutorial')
+        )
         .addSubcommand(sub => 
             sub.setName('stats')
                .setDescription('View system statistics')
@@ -56,7 +61,18 @@ export const adminCommand: Command = {
         const subcommand = interaction.options.getSubcommand();
 
         try {
-            if (subcommand === 'stats') {
+            if (subcommand === 'tutorial') {
+                const view = renderTutorialMenu();
+                // Send to channel so it stays
+                if (interaction.channel && interaction.channel.isSendable()) {
+                    await interaction.channel.send({ embeds: view.embeds, components: view.components });
+                    await interaction.reply({ content: '✅ Tutorial Deployed!', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Cannot send messages here.', ephemeral: true });
+                }
+            }
+
+            else if (subcommand === 'stats') {
                 const statsView = await renderStats();
                 await interaction.reply({ embeds: statsView.embeds, ephemeral: true });
             }

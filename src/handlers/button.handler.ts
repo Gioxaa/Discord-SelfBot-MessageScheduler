@@ -13,6 +13,7 @@ import { renderPaymentInvoice } from '../views/payment.view';
 import { PRODUCTS } from '../config';
 import { renderAccountList, renderAccountDetail } from '../views/account.view';
 import { renderTerms } from '../views/store.view';
+import { renderTutorialMenu, renderTutorialPC, renderTutorialAndroid } from '../views/tutorial.view';
 import { validateToken } from '../utils/discordHelper';
 import prisma from '../database/client';
 
@@ -56,6 +57,22 @@ export async function handleButton(interaction: ButtonInteraction) {
     try {
         if (customId === 'btn_view_terms') {
             const view = renderTerms();
+            await interaction.reply({ ...view } as any);
+        }
+
+        else if (customId === 'btn_view_tutorial') {
+            const view = renderTutorialMenu();
+            // Show ephemeral so they don't spam the chat if clicked from Store
+            await interaction.reply({ content: view.content || '', embeds: view.embeds, components: view.components, ephemeral: true });
+        }
+
+        else if (customId === 'btn_tutorial_pc') {
+            const view = renderTutorialPC();
+            await interaction.reply({ ...view } as any);
+        }
+
+        else if (customId === 'btn_tutorial_android') {
+            const view = renderTutorialAndroid();
             await interaction.reply({ ...view } as any);
         }
 

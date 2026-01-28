@@ -5,10 +5,10 @@ import { Logger } from './logger';
 export async function validateOwnership(interaction: Interaction): Promise<boolean> {
     if (!interaction.isRepliable()) return false;
 
-    // 1. Allow Public Interactions (Store/Buy Buttons, Terms)
+    // 1. Allow Public Interactions (Store/Buy Buttons, Terms, Tutorial)
     // We check customId if available (Buttons, Modals, Selects)
     const customId = (interaction as any).customId;
-    if (customId && (customId.startsWith('btn_buy_') || customId === 'btn_view_terms')) {
+    if (customId && (customId.startsWith('btn_buy_') || customId === 'btn_view_terms' || customId === 'btn_view_tutorial' || customId.startsWith('btn_tutorial_'))) {
         return true;
     }
 

@@ -236,14 +236,17 @@ export class WorkerService {
 
     private static createWorker(workerData: any): Worker {
         const isTsNode = (process as any)[Symbol.for('ts-node.register.instance')] || __filename.endsWith('.ts');
-
+        
         // Point to src/workers/bot.worker.ts or dist/workers/bot.worker.js
-        const workerFileName = 'bot.worker';
-        const finalPath = isTsNode
+        const workerFileName = 'bot.worker'; 
+        const finalPath = isTsNode 
             ? path.resolve(__dirname, `../workers/${workerFileName}.ts`)
             : path.resolve(__dirname, `../workers/${workerFileName}.js`);
 
-        const workerConf: any = { workerData };
+        const workerConf: any = { 
+            workerData,
+            resourceLimits: { maxOldGenerationSizeMb: 2048 } // Limit to 2GB to prevent Heap OOM
+        };
         if (isTsNode) workerConf.execArgv = ["-r", "ts-node/register"];
 
         return new Worker(finalPath, workerConf);

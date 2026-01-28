@@ -22,16 +22,33 @@ const mode = payload.mode || 'RUN';
 // 1. Initialize Client
 const client = new Client({
   checkUpdate: false,
-  partials: ['CHANNEL', 'MESSAGE'],
+  partials: ['CHANNEL', 'MESSAGE', 'USER', 'GUILD_MEMBER', 'REACTION'],
   makeCache: (manager: any) => {
-      if (mode.startsWith('FETCH')) {
-          if (manager.name === 'GuildManager' || manager.name === 'ChannelManager') {
-              return new (require('discord.js-selfbot-v13').Collection)();
-          }
+      const LimitedCollection = require('discord.js-selfbot-v13').LimitedCollection;
+      
+      // Managers to DISABLE caching for (Memory Hogs)
+      if ([
+          'GuildMemberManager', 
+          'UserManager', 
+          'PresenceManager', 
+          'MessageManager', 
+          'ReactionManager', 
+          'GuildBanManager', 
+          'GuildInviteManager', 
+          'GuildStickerManager', 
+          'GuildScheduledEventManager', 
+          'StageInstanceManager', 
+          'VoiceStateManager',
+          'ThreadMemberManager'
+      ].includes(manager.name)) {
+          return new LimitedCollection({ maxSize: 0 });
       }
-      if (mode === 'RUN' && manager.name === 'ChannelManager') {
-          return new (require('discord.js-selfbot-v13').Collection)();
-      }
+
+      // For Core Managers (Guild, Channel, Role, PermissionOverwrite), 
+      // let Discord.js use its default structure to avoid "UnsupportedCacheOverwriteWarning" 
+      // and functionality breakage (like the 'isDefault' null error).
+      
+      // Returning undefined/null tells the library to use the default cache
       return new (require('discord.js-selfbot-v13').Collection)(); 
   },
   presence: { status: 'invisible' }

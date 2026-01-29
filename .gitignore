@@ -45,4 +45,5 @@ coverage/
 # Misc
 .npm
 .eslintcache
+AGENTS.md
 

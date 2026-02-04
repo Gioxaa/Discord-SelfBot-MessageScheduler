@@ -14,7 +14,7 @@ export async function validateOwnership(interaction: Interaction): Promise<boole
 
     // 2. Check if current channel is a Workspace
     const channelId = interaction.channelId;
-    if (!channelId) return true; // Should not happen in guild
+    if (!channelId) return false; // Fail-closed: deny access if channelId is missing
 
     try {
         // Find user who owns this workspace channel

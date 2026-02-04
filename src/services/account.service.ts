@@ -57,4 +57,23 @@ export class AccountService {
             throw error;
         }
     }
+
+    static async updateToken(accountId: string, newToken: string, name?: string, avatar?: string) {
+        try {
+            const encryptedToken = encrypt(newToken);
+            const account = await prisma.account.update({
+                where: { id: accountId },
+                data: { 
+                    token: encryptedToken,
+                    name: name || undefined,
+                    avatar: avatar || undefined
+                }
+            });
+            Logger.info(`Token updated for account ${accountId}`, 'AccountService');
+            return account;
+        } catch (error) {
+            Logger.error('Failed to update token', error, 'AccountService');
+            throw error;
+        }
+    }
 }

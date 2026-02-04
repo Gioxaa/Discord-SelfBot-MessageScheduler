@@ -1,4 +1,4 @@
-import { ButtonInteraction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, MessageFlags } from 'discord.js';
+import { ButtonInteraction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { PaymentService } from '../services/payment.service';
 import { WorkerService } from '../services/worker.service';
 import { AccountService } from '../services/account.service';
@@ -24,8 +24,8 @@ export async function handleButton(interaction: ButtonInteraction) {
 
     const { customId } = interaction;
 
-    // Subscription Check for Task Management
-    if (['btn_setup_task', 'btn_stop_all', 'btn_stop_task_', 'btn_resume_task_', 'btn_edit_', 'btn_preview_task_', 'btn_delete_task_'].some(prefix => customId.startsWith(prefix))) {
+    // Subscription Check for Task Management and Account Management
+    if (['btn_setup_task', 'btn_stop_all', 'btn_stop_task_', 'btn_resume_task_', 'btn_edit_', 'btn_preview_task_', 'btn_delete_task_', 'btn_add_account', 'btn_manage_accounts', 'btn_check_account_', 'btn_delete_account_', 'btn_update_token_'].some(prefix => customId.startsWith(prefix))) {
         const isActive = await validateActiveSubscription(interaction.user.id);
         if (!isActive) {
             // Attempt to update the embed if it's a task-specific button
@@ -269,6 +269,28 @@ export async function handleButton(interaction: ButtonInteraction) {
             } as any);
         }
 
+        // ==================== UPDATE TOKEN BUTTON ====================
+        else if (customId.startsWith('btn_update_token_')) {
+            const accountId = customId.replace('btn_update_token_', '');
+            
+            const modal = new ModalBuilder()
+                .setCustomId(`modal_update_token_${accountId}`)
+                .setTitle('Update Token');
+            
+            const tokenInput = new TextInputBuilder()
+                .setCustomId('new_token_input')
+                .setLabel('Enter your new Discord Token')
+                .setPlaceholder('Paste your new token here...')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
+            
+            modal.addComponents(
+                new ActionRowBuilder<TextInputBuilder>().addComponents(tokenInput)
+            );
+            
+            await interaction.showModal(modal);
+        }
+
         else if (customId.startsWith('btn_page_guild_')) {
             // Format: btn_page_guild_{accountId}_{page}
             const parts = customId.split('_');
@@ -324,6 +346,7 @@ export async function handleButton(interaction: ButtonInteraction) {
             // Always add Cancel/Search
             buttons.push(
                 new ButtonBuilder().setCustomId(`btn_search_guild_${accountId}`).setLabel('Search').setStyle(ButtonStyle.Primary).setEmoji('🔍'),
+                new ButtonBuilder().setCustomId('btn_back_step1').setLabel('Back').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
             );
 
@@ -342,7 +365,26 @@ export async function handleButton(interaction: ButtonInteraction) {
                     }))
                 );
 
+            // Build embed with correct page number
+            const accountName = account.name || 'Unknown';
+            const embed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:arrow:1306059259615903826> Server : *Select from dropdown*
+<a:offline:1306203222263988285> Channel : *Pending*
+<a:offline:1306203222263988285> Strategy : *Pending*
+\u200b
+> Found **${guilds.length}** servers (Page ${page + 1}/${totalPages})
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
             await interaction.editReply({
+                embeds: [embed],
                 components: [
                     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
                     new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
@@ -408,10 +450,30 @@ export async function handleButton(interaction: ButtonInteraction) {
             }
 
             buttons.push(
+                new ButtonBuilder().setCustomId(`btn_back_step2_${accountId}`).setLabel('Back').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
             );
 
+            // Build embed with correct page number
+            const accountName = account.name || 'Unknown';
+            const embed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:Tick_green:1306061558303952937> Server : *Selected*
+<a:arrow:1306059259615903826> Channel : *Select from dropdown*
+<a:offline:1306203222263988285> Strategy : *Pending*
+\u200b
+> Found **${channels.length}** channels (Page ${page + 1}/${totalPages})
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
             await interaction.editReply({
+                embeds: [embed],
                 components: [
                     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
                     new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
@@ -465,9 +527,23 @@ export async function handleButton(interaction: ButtonInteraction) {
                     }))
                 );
 
+            const embed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:arrow:1306059259615903826> Account : *Select from dropdown*
+<a:offline:1306203222263988285> Server : *Pending*
+<a:offline:1306203222263988285> Channel : *Pending*
+<a:offline:1306203222263988285> Strategy : *Pending*
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
             await interaction.editReply({
-                content: `**Step 1: Select Account**`,
-                embeds: [],
+                content: '',
+                embeds: [embed],
                 components: [
                     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
                     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -491,6 +567,271 @@ export async function handleButton(interaction: ButtonInteraction) {
                 embeds: dashboard.embeds,
                 components: dashboard.components
             });
+        }
+
+        // ==================== BACK BUTTONS FOR TASK SETUP ====================
+        else if (customId === 'btn_back_step1') {
+            // Back to Step 1: Select Account
+            // Show loading first
+            const loadingEmbed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+<a:loading_gif:1306062016611614741> *Loading accounts...*
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
+            await interaction.update({
+                content: '',
+                embeds: [loadingEmbed],
+                components: []
+            });
+
+            const accounts = await AccountService.getByUserId(interaction.user.id);
+
+            if (accounts.length === 0) {
+                await interaction.editReply({ content: '❌ No accounts found. Please add an account first.', embeds: [], components: [] });
+                return;
+            }
+
+            const select = new StringSelectMenuBuilder()
+                .setCustomId('select_account_task')
+                .setPlaceholder('Choose an account...')
+                .addOptions(
+                    accounts.map(acc => ({
+                        label: acc.name || `Account ${acc.id.substring(0, 4)}`,
+                        value: acc.id
+                    }))
+                );
+
+            const embed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:arrow:1306059259615903826> Account : *Select from dropdown*
+<a:offline:1306203222263988285> Server : *Pending*
+<a:offline:1306203222263988285> Channel : *Pending*
+<a:offline:1306203222263988285> Strategy : *Pending*
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
+            await interaction.editReply({
+                content: '',
+                embeds: [embed],
+                components: [
+                    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+                    new ActionRowBuilder<ButtonBuilder>().addComponents(
+                        new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                    )
+                ]
+            });
+        }
+
+        else if (customId.startsWith('btn_back_step2_')) {
+            // Back to Step 2: Select Server
+            const accountId = customId.replace('btn_back_step2_', '');
+
+            const account = await AccountService.getById(accountId);
+            if (!account) {
+                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                return;
+            }
+            const accountName = account.name || 'Unknown';
+
+            // Show loading first
+            const loadingEmbed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:loading_gif:1306062016611614741> Server : *Fetching...*
+<a:offline:1306203222263988285> Channel : *Pending*
+<a:offline:1306203222263988285> Strategy : *Pending*
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
+            await interaction.update({
+                content: '',
+                embeds: [loadingEmbed],
+                components: []
+            });
+
+            try {
+                const token = AccountService.getDecryptedToken(account);
+                const guilds = await WorkerService.fetchGuilds(token); // From CACHE
+                
+                const ITEMS_PER_PAGE = 25;
+                const slicedGuilds = guilds.slice(0, ITEMS_PER_PAGE);
+                const totalPages = Math.ceil(guilds.length / ITEMS_PER_PAGE);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`select_guild_task_${accountId}`)
+                    .setPlaceholder(`Select a server (Page 1/${totalPages})`)
+                    .addOptions(
+                        slicedGuilds.map((g: any) => ({
+                            label: g.name.substring(0, 100),
+                            value: g.id,
+                            description: `ID: ${g.id}`
+                        }))
+                    );
+
+                const buttons: ButtonBuilder[] = [];
+                
+                if (guilds.length > ITEMS_PER_PAGE) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(`btn_page_guild_${accountId}_1`)
+                            .setLabel('Next ➡️')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+                }
+
+                buttons.push(
+                    new ButtonBuilder().setCustomId(`btn_search_guild_${accountId}`).setLabel('Search').setStyle(ButtonStyle.Primary).setEmoji('🔍'),
+                    new ButtonBuilder().setCustomId('btn_back_step1').setLabel('Back').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                );
+
+                const resultEmbed = new EmbedBuilder()
+                    .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:arrow:1306059259615903826> Server : *Select from dropdown*
+<a:offline:1306203222263988285> Channel : *Pending*
+<a:offline:1306203222263988285> Strategy : *Pending*
+\u200b
+> Found **${guilds.length}** servers (Page 1/${totalPages})
+`)
+                    .setColor(0x5865F2)
+                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setTimestamp();
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [resultEmbed],
+                    components: [
+                        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+                        new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
+                    ]
+                });
+
+            } catch (error: any) {
+                await interaction.editReply({ content: `❌ Failed to fetch servers: ${error.message}`, embeds: [], components: [] });
+            }
+        }
+
+        else if (customId.startsWith('btn_back_step3_')) {
+            // Back to Step 3: Select Channel
+            const parts = customId.replace('btn_back_step3_', '').split('_');
+            const accountId = parts[0];
+            const guildId = parts[1];
+
+            const account = await AccountService.getById(accountId);
+            if (!account) {
+                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                return;
+            }
+            const accountName = account.name || 'Unknown';
+
+            // Show loading first
+            const loadingEmbed = new EmbedBuilder()
+                .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:Tick_green:1306061558303952937> Server : *Selected*
+<a:loading_gif:1306062016611614741> Channel : *Fetching...*
+<a:offline:1306203222263988285> Strategy : *Pending*
+`)
+                .setColor(0x5865F2)
+                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setTimestamp();
+
+            await interaction.update({
+                content: '',
+                embeds: [loadingEmbed],
+                components: []
+            });
+
+            try {
+                const token = AccountService.getDecryptedToken(account);
+                const channels = await WorkerService.fetchChannels(token, guildId); // From CACHE
+
+                if (channels.length === 0) {
+                    await interaction.editReply({ content: '❌ No text channels found.', embeds: [], components: [] });
+                    return;
+                }
+
+                const ITEMS_PER_PAGE = 25;
+                const slicedChannels = channels.slice(0, ITEMS_PER_PAGE);
+                const totalPages = Math.ceil(channels.length / ITEMS_PER_PAGE);
+
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId(`select_channel_task_${accountId}_${guildId}`)
+                    .setPlaceholder(`Choose a channel (Page 1/${totalPages})`)
+                    .addOptions(
+                        slicedChannels.map((c: any) => ({
+                            label: c.name.substring(0, 50),
+                            value: `${c.id}|${c.rateLimitPerUser}`,
+                            description: `Slowmode: ${c.rateLimitPerUser}s`
+                        }))
+                    );
+
+                const buttons: ButtonBuilder[] = [];
+
+                if (channels.length > ITEMS_PER_PAGE) {
+                    buttons.push(
+                        new ButtonBuilder()
+                            .setCustomId(`btn_page_channel_${accountId}_${guildId}_1`)
+                            .setLabel('Next ➡️')
+                            .setStyle(ButtonStyle.Secondary)
+                    );
+                }
+
+                buttons.push(
+                    new ButtonBuilder().setCustomId(`btn_back_step2_${accountId}`).setLabel('Back').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('btn_cancel_setup').setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                );
+
+                const resultEmbed = new EmbedBuilder()
+                    .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**PROGRESS**
+<a:Tick_green:1306061558303952937> Account : **${accountName}**
+<a:Tick_green:1306061558303952937> Server : *Selected*
+<a:arrow:1306059259615903826> Channel : *Select from dropdown*
+<a:offline:1306203222263988285> Strategy : *Pending*
+\u200b
+> Found **${channels.length}** channels (Page 1/${totalPages})
+`)
+                    .setColor(0x5865F2)
+                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setTimestamp();
+
+                await interaction.editReply({
+                    content: '',
+                    embeds: [resultEmbed],
+                    components: [
+                        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
+                        new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)
+                    ]
+                });
+
+            } catch (error: any) {
+                await interaction.editReply({ content: `❌ Failed to fetch channels: ${error.message}`, embeds: [], components: [] });
+            }
         }
 
         else if (customId === 'btn_stop_all') {
@@ -639,14 +980,33 @@ export async function handleButton(interaction: ButtonInteraction) {
                 return;
             }
 
-            const channel = interaction.channel;
+             const channel = interaction.channel;
             if (!channel || channel.type !== ChannelType.GuildText) {
                 await interaction.editReply('❌ Preview only works in standard text channels.');
                 return;
             }
+            
+            // Permission check untuk thread dan invite creation
+            const member = channel.guild?.members.cache.get(interaction.user.id);
+            const permissions = member?.permissions;
+            
+            if (!permissions) {
+                await interaction.editReply('❌ Could not check your permissions.');
+                return;
+            }
+            
+            if (!permissions.has(PermissionFlagsBits.CreatePublicThreads)) {
+                await interaction.editReply('❌ You need "Create Public Threads" permission to use preview.');
+                return;
+            }
+            
+            if (!permissions.has(PermissionFlagsBits.CreateInstantInvite)) {
+                await interaction.editReply('❌ You need "Create Invite" permission to use preview.');
+                return;
+            }
 
             try {
-                // 1. Find or Create 'preview-logs' thread
+                // 1. Find or Create 'preview-text' thread
                 let thread = channel.threads.cache.find(t => t.name === 'preview-text');
                 if (!thread) {
                     thread = await channel.threads.create({
@@ -744,9 +1104,26 @@ export async function handleButton(interaction: ButtonInteraction) {
                 new ActionRowBuilder<TextInputBuilder>().addComponents(delayInput)
             );
             await interaction.showModal(modal);
+        } else {
+            // Unknown button - Fallback handler
+            Logger.warn(`Unhandled button customId: ${customId}`, 'ButtonHandler');
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: '❌ Unknown action.', flags: 1 << 6 });
+            }
         }
 
     } catch (error) {
         Logger.error('Button Handler Error', error);
+        // Berikan feedback ke user jika terjadi error
+        try {
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: '❌ An error occurred. Please try again.', flags: 1 << 6 });
+            } else if (interaction.deferred) {
+                await interaction.editReply({ content: '❌ An error occurred. Please try again.' });
+            }
+        } catch (replyError) {
+            // Ignore reply errors - interaction might have expired
+            Logger.warn('Failed to send error feedback to user', 'ButtonHandler');
+        }
     }
 }

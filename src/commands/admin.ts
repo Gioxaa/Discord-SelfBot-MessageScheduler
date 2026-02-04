@@ -1,10 +1,11 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, GuildMember } from 'discord.js';
 import { Command } from '../interfaces/command';
 import { AdminService } from '../services/admin.service';
 import { config } from '../config';
 import { EmbedBuilder } from 'discord.js';
 import { renderStats } from '../views/stats.view';
 import { renderTutorialMenu } from '../views/tutorial.view';
+import { Logger } from '../utils/logger';
 
 export const adminCommand: Command = {
     data: new SlashCommandBuilder()
@@ -28,17 +29,17 @@ export const adminCommand: Command = {
             sub.setName('add_time')
                .setDescription('Add subscription time to a user')
                .addUserOption(opt => opt.setName('target').setDescription('The user').setRequired(true))
-               .addIntegerOption(opt => opt.setName('days').setDescription('Days to add').setRequired(false))
-               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to add').setRequired(false))
-               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to add').setRequired(false))
+               .addIntegerOption(opt => opt.setName('days').setDescription('Days to add').setRequired(false).setMinValue(0))
+               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to add').setRequired(false).setMinValue(0))
+               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to add').setRequired(false).setMinValue(0))
         )
         .addSubcommand(sub => 
             sub.setName('remove_time')
                .setDescription('Remove subscription time from a user')
                .addUserOption(opt => opt.setName('target').setDescription('The user').setRequired(true))
-               .addIntegerOption(opt => opt.setName('days').setDescription('Days to remove').setRequired(false))
-               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to remove').setRequired(false))
-               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to remove').setRequired(false))
+               .addIntegerOption(opt => opt.setName('days').setDescription('Days to remove').setRequired(false).setMinValue(0))
+               .addIntegerOption(opt => opt.setName('hours').setDescription('Hours to remove').setRequired(false).setMinValue(0))
+               .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to remove').setRequired(false).setMinValue(0))
         )
         .addSubcommand(sub => 
             sub.setName('delete_workspace')
@@ -48,9 +49,8 @@ export const adminCommand: Command = {
 
     execute: async (interaction) => {
         // 1. Verify Role
-        const member = interaction.member;
-        const roles = (member as any).roles; // Quick access for cache
-        const isAdmin = config.adminRoleId && roles.cache.has(config.adminRoleId);
+        const member = interaction.member as GuildMember | null;
+        const isAdmin = member && config.adminRoleId && member.roles.cache.has(config.adminRoleId);
         
         // Allow Owner (ADMIN_ID) or Role
         if (interaction.user.id !== config.adminId && !isAdmin) {
@@ -147,7 +147,7 @@ export const adminCommand: Command = {
                     await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
                 }
             } catch (e) {
-                console.error('[AdminCommand] Failed to send error response:', e);
+                Logger.error('Failed to send error response', e, 'AdminCommand');
             }
         }
     }

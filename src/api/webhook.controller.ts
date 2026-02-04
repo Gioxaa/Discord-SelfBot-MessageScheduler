@@ -1,28 +1,41 @@
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/payment.service';
-import { WorkspaceService } from '../services/workspace.service';
-import { config } from '../config';
 import { Client } from 'discord.js';
+import { Logger } from '../utils/logger';
 
 export class WebhookController {
     static async handlePaKasir(req: Request, res: Response, client: Client) {
-        console.log('[Webhook] Received payment notification:', req.body);
-  
-        try {
-            const { status, transaction } = await PaymentService.handleWebhook(req.body, client);
+        Logger.info('Received payment notification', 'Webhook');
 
-            if (status === 'SUCCESS' && transaction) {
-                console.log(`[Payment] Verified! Subscription extended for user ${transaction.userId}...`);
-            } else if (status === 'ALREADY_PROCESSED') {
-                console.log('[Payment] Transaction already processed.');
-            } else {
-                console.log(`[Payment] Ignored status: ${status}`);
+        try {
+            const { amount, order_id, status, payment_method, completed_at } = req.body;
+
+            // Validasi dasar
+            if (!amount || !order_id || !status) {
+                Logger.warn('Invalid webhook payload - missing required fields', 'Webhook');
+                res.status(400).send('Bad Request');
+                return;
+            }
+
+            // Proses webhook (PaymentService sudah handle duplicate check)
+            const result = await PaymentService.handleWebhook(req.body, client);
+
+            if (result.status === 'SUCCESS' && result.transaction) {
+                Logger.info(`Payment verified! Subscription extended for user ${result.transaction.userId}`, 'Webhook');
+            } else if (result.status === 'ALREADY_PROCESSED') {
+                Logger.info('Transaction already processed (preventing duplicate)', 'Webhook');
+            } else if (result.status === 'IGNORED') {
+                Logger.debug(`Ignored payment status: ${status}`, 'Webhook');
+            } else if (result.status === 'INVALID') {
+                Logger.warn(`Invalid webhook status received: ${status}`, 'Webhook');
+                res.status(400).send('Invalid Payment Status');
+                return;
             }
             
             res.status(200).send('OK');
 
         } catch (err: any) {
-            console.error('[Webhook Error]', err.message);
+            Logger.error('Webhook processing failed', err, 'Webhook');
             res.status(500).send('Error');
         }
     }

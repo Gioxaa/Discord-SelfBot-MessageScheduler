@@ -89,7 +89,7 @@ export function renderStore() {
 **PRICING PLANS**
 ${Object.values(PRODUCTS).map(p => `<a:arrow:1306059259615903826> **${p.name}** : Rp ${p.price.toLocaleString('id-ID')} / ${p.durationDays} Days`).join('\n')}
 `)
-        .setColor('Purple') // Discord Green
+        .setColor(0x5865F2) // Discord Blurple
         .setFooter({ text: 'AutoPost | Powered by Frey' })
         .setTimestamp()
         .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');

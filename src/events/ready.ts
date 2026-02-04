@@ -3,9 +3,10 @@ import { WorkerService } from '../services/worker.service';
 import { WorkspaceService } from '../services/workspace.service';
 import { StatsService } from '../services/stats.service';
 import { SchedulerService } from '../services/scheduler.service';
+import { Logger } from '../utils/logger';
 
 export async function onReady(client: Client) {
-    console.log(`[Main Bot] Ready! Logged in as ${client.user?.tag}`);
+    Logger.info(`Ready! Logged in as ${client.user?.tag}`, 'MainBot');
     
     // Start Stats Auto-Refresh immediately (Independent)
     StatsService.startAutoRefresh(client);
@@ -17,12 +18,12 @@ export async function onReady(client: Client) {
     try {
         await WorkerService.syncTasksOnStartup(client);
     } catch (e) {
-        console.error('[Main Bot] Failed to sync tasks on startup:', e);
+        Logger.error('Failed to sync tasks on startup', e, 'MainBot');
     }
 
     try {
         await WorkspaceService.syncPanelsOnStartup(client);
     } catch (e) {
-        console.error('[Main Bot] Failed to sync panels on startup:', e);
+        Logger.error('Failed to sync panels on startup', e, 'MainBot');
     }
 }

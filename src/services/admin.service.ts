@@ -41,6 +41,39 @@ export class AdminService {
         });
     }
 
+    static async getUserControlPanelData(userId: string) {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                accounts: true
+            }
+        });
+
+        if (!user) throw new Error('User not found');
+
+        const accountCount = user.accounts.length;
+        const activeTaskCount = await prisma.task.count({
+            where: {
+                account: { userId },
+                status: 'RUNNING'
+            }
+        });
+
+        // Aggregate Total Messages for this user
+        const msgStats = await prisma.task.aggregate({
+            where: { account: { userId } },
+            _sum: { totalSent: true }
+        });
+        const totalMessagesSent = msgStats._sum.totalSent || 0;
+
+        return {
+            user,
+            accountCount,
+            activeTaskCount,
+            totalMessagesSent
+        };
+    }
+
     static async addTime(userId: string, days: number, hours: number = 0, minutes: number = 0, client?: Client) {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) throw new Error('User not found');

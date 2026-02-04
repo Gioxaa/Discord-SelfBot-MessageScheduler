@@ -204,8 +204,18 @@ async function runPreview() {
 
 // --- HELPER FUNCTIONS ---
 
-function getRandomDelay(min: number, max: number) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+const MAX_DELAY_MS = 86400000; // 24 jam maximum delay
+const MAX_CHANNEL_FETCH_RETRIES = 5; // Maximum retry untuk channel fetch
+
+function getRandomDelay(min: number, max: number): number {
+    // Validasi input
+    if (min < 0) min = 0;
+    if (max < 0) max = 0;
+    if (min > max) [min, max] = [max, min]; // Swap jika terbalik
+    if (max > MAX_DELAY_MS) max = MAX_DELAY_MS;
+    if (min > MAX_DELAY_MS) min = MAX_DELAY_MS;
+    
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 function log(msg: string) {
@@ -221,11 +231,21 @@ function error(msg: string) {
 // --- MULTI-TASK LOGIC ---
 
 // Active Tasks Registry
-const activeTasks = new Map<string, { timeout: NodeJS.Timeout | null, config: any }>();
+const activeTasks = new Map<string, { 
+    timeout: NodeJS.Timeout | null, 
+    config: any, 
+    channelFetchRetries: number // Track retry count per task
+}>();
 
 // Handle Parent Messages
 if (parentPort) {
     parentPort.on('message', async (msg) => {
+        // Validasi message dari parent
+        if (msg === null || msg === undefined) {
+            error('[Worker] Received null/undefined message from parent');
+            return;
+        }
+
         if (msg === 'STOP') {
             isRunning = false;
             // Clear all tasks
@@ -238,19 +258,42 @@ if (parentPort) {
         }
         else if (msg.type === 'START_TASK') {
             const { taskId, config } = msg;
+
+            // Validasi START_TASK payload
+            if (!taskId || typeof taskId !== 'string') {
+                error('[Worker] Invalid START_TASK: missing taskId');
+                return;
+            }
+            if (!config || typeof config !== 'object') {
+                error('[Worker] Invalid START_TASK: missing config');
+                return;
+            }
+            if (!config.channelId || typeof config.channelId !== 'string') {
+                error('[Worker] Invalid START_TASK: missing channelId');
+                return;
+            }
+
             if (activeTasks.has(taskId)) {
                 stopTask(taskId); // Restart if exists
             }
             
             log(`[Worker] Starting Task ${taskId} on #${config.channelId}`);
             
-            activeTasks.set(taskId, { timeout: null, config });
+            activeTasks.set(taskId, { timeout: null, config, channelFetchRetries: 0 });
             
             // Start Loop
             processTask(taskId);
         }
         else if (msg.type === 'STOP_TASK') {
+            if (!msg.taskId || typeof msg.taskId !== 'string') {
+                error('[Worker] Invalid STOP_TASK: missing taskId');
+                return;
+            }
             stopTask(msg.taskId);
+        }
+        else {
+            // Unknown message type
+            error(`[Worker] Unknown message type: ${msg.type || 'undefined'}`);
         }
     });
 }
@@ -275,20 +318,50 @@ async function processTask(taskId: string) {
     if (!channel) {
         try {
             channel = await client.channels.fetch(config.channelId);
+            // Reset retry counter on success
+            task.channelFetchRetries = 0;
         } catch (e) {
-            error(`[Task ${taskId}] Channel not found: ${config.channelId}`);
-            // Retry later or stop? Let's retry in 30s
+            task.channelFetchRetries++;
+            
+            // Check if max retries exceeded
+            if (task.channelFetchRetries >= MAX_CHANNEL_FETCH_RETRIES) {
+                error(`[Task ${taskId}] Channel fetch failed after ${MAX_CHANNEL_FETCH_RETRIES} retries. Stopping task.`);
+                if (parentPort) {
+                    parentPort.postMessage({
+                        type: 'log',
+                        taskId,
+                        status: 'error',
+                        content: `Channel ${config.channelId} not accessible after ${MAX_CHANNEL_FETCH_RETRIES} retries`,
+                        url: null,
+                        nextDelay: 0
+                    });
+                }
+                stopTask(taskId);
+                return;
+            }
+            
+            error(`[Task ${taskId}] Channel not found (retry ${task.channelFetchRetries}/${MAX_CHANNEL_FETCH_RETRIES}): ${config.channelId}`);
             task.timeout = setTimeout(() => processTask(taskId), 30000);
             return;
         }
     }
 
     if (!channel || !channel.isText()) {
-        error(`[Task ${taskId}] Invalid Channel or Not Found. Retrying in 30s...`);
-        // Retry instead of dying
+        task.channelFetchRetries++;
+        
+        if (task.channelFetchRetries >= MAX_CHANNEL_FETCH_RETRIES) {
+            error(`[Task ${taskId}] Invalid channel after ${MAX_CHANNEL_FETCH_RETRIES} retries. Stopping task.`);
+            stopTask(taskId);
+            return;
+        }
+        
+        error(`[Task ${taskId}] Invalid Channel (retry ${task.channelFetchRetries}/${MAX_CHANNEL_FETCH_RETRIES}). Retrying in 30s...`);
         task.timeout = setTimeout(() => processTask(taskId), 30000);
         return; 
     }
+    
+    // Reset retry counter on successful channel access
+    task.channelFetchRetries = 0;
 
     // Metadata Self-Healing
     if (parentPort && (channel.type === 'GUILD_TEXT' || channel.type === 'GUILD_NEWS' || channel.isThread())) {
@@ -386,5 +459,11 @@ client.on('ready', async () => {
 
 client.login(payload.token).catch(err => {
     error(`Login Failed: ${err.message}`);
-    process.exit(1);
+    // Exit code 2 = Token Invalid (jangan restart)
+    // Exit code 1 = Error lain (boleh restart)
+    const isInvalidToken = err.message?.toLowerCase().includes('invalid token') ||
+                           err.message?.toLowerCase().includes('unauthorized') ||
+                           err.code === 'TOKEN_INVALID' ||
+                           err.code === 'DISALLOWED_INTENTS';
+    process.exit(isInvalidToken ? 2 : 1);
 });

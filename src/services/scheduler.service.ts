@@ -6,18 +6,47 @@ import { Logger } from '../utils/logger';
 
 export class SchedulerService {
     private static INTERVAL_MS = 60 * 1000; // Check every 1 minute
+    private static CHECK_EXPIRY_WINDOW_MS = 60 * 1000 * 10; // Look back 10 minutes
+    
+    private static intervals: NodeJS.Timeout[] = [];
+    private static isRunning = false;
 
     static init(client: Client) {
+        // Prevent multiple init() calls
+        if (this.isRunning) {
+            Logger.warn('[Scheduler] Service already running. Ignoring duplicate init().', 'SchedulerService');
+            return;
+        }
+        
         Logger.info('[Scheduler] Service started. Watchdog active.', 'SchedulerService');
+        this.isRunning = true;
         
         // Initial check on startup
         this.checkExpiredSubscriptions(client);
-
+        
         // Periodic check
-        setInterval(() => {
+        const interval = setInterval(() => {
             this.checkExpiredSubscriptions(client);
-            this.syncActiveUserStats(client); // [NEW] Refresh active users panel
+            this.syncActiveUserStats(client);
         }, this.INTERVAL_MS);
+        
+        this.intervals.push(interval);
+    }
+
+    static stop() {
+        if (!this.isRunning) {
+            Logger.warn('[Scheduler] Service not running.', 'SchedulerService');
+            return;
+        }
+        
+        Logger.info('[Scheduler] Stopping service...', 'SchedulerService');
+        this.isRunning = false;
+        
+        // Clear all intervals
+        for (const interval of this.intervals) {
+            clearInterval(interval);
+        }
+        this.intervals = [];
     }
 
     // [NEW] Refresh Panel for users with RUNNING tasks (to update Total Sent stats)

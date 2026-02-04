@@ -7,12 +7,28 @@ import {
 } from 'discord.js';
 import prisma from '../database/client';
 import { renderControlPanel } from '../views/controlPanel.view';
+import { Logger } from '../utils/logger';
 
 export class WorkspaceService {
   
   static async createWorkspace(client: Client, guildId: String, userId: string) {
     const guild = client.guilds.cache.get(guildId.toString());
     if (!guild) throw new Error('Guild not found');
+
+    // Permission check: Bot needs ManageChannels and ManageThreads
+    const botMember = guild.members.cache.get(client.user!.id);
+    if (!botMember) throw new Error('Bot is not in the guild');
+
+    const requiredPerms = [
+      PermissionFlagsBits.ManageChannels,
+      PermissionFlagsBits.CreatePublicThreads,
+      PermissionFlagsBits.SendMessages
+    ];
+
+    const missingPerms = requiredPerms.filter(p => !botMember.permissions.has(p));
+    if (missingPerms.length > 0) {
+      throw new Error('Bot is missing required permissions: ManageChannels, CreatePublicThreads, SendMessages');
+    }
 
     const user = await client.users.fetch(userId);
     if (!user) throw new Error('User not found');
@@ -48,52 +64,69 @@ export class WorkspaceService {
     // 4. Create Private Channel
     const channelName = `workspace-${user.username.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
     
-    const channel = await guild.channels.create({
-      name: channelName,
-      type: ChannelType.GuildText,
-      parent: category.id,
-      permissionOverwrites: [
-        {
-          id: guild.id, // @everyone
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
-        {
-          id: client.user!.id, // Bot
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.SendMessages],
-        },
-        {
-          id: userId, // The Customer
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-        },
-      ],
-      topic: `Private Workspace for ${user.tag}. Expires: ${expiryDate.toLocaleString()}`,
-    });
+    let channel;
+    let thread;
+    
+    try {
+      channel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: [
+          {
+            id: guild.id, // @everyone
+            deny: [PermissionFlagsBits.ViewChannel],
+          },
+          {
+            id: client.user!.id, // Bot
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.SendMessages],
+          },
+          {
+            id: userId, // The Customer
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+          },
+        ],
+        topic: `Private Workspace for ${user.tag}. Expires: ${expiryDate.toLocaleString()}`,
+      });
 
-    // 4. Create Log Thread
-    const thread = await channel.threads.create({
-      name: '📜-live-logs',
-      autoArchiveDuration: 1440,
-      reason: 'Logs for selfbot activity',
-    });
+      // 5. Create Log Thread
+      thread = await channel.threads.create({
+        name: '📜-live-logs',
+        autoArchiveDuration: 1440,
+        reason: 'Logs for selfbot activity',
+      });
 
-    // 5. Update Database (Do NOT overwrite expiryDate)
-    await prisma.user.upsert({
-      where: { id: userId },
-      update: {
-        workspaceChannelId: channel.id,
-        logThreadId: thread.id,
-        username: user.tag
-      },
-      create: {
-        id: userId,
-        workspaceChannelId: channel.id,
-        logThreadId: thread.id,
-        expiryDate: expiryDate, // Only set on create if new
-        username: user.tag
+      // 6. Update Database (Do NOT overwrite expiryDate)
+      await prisma.user.upsert({
+        where: { id: userId },
+        update: {
+          workspaceChannelId: channel.id,
+          logThreadId: thread.id,
+          username: user.tag
+        },
+        create: {
+          id: userId,
+          workspaceChannelId: channel.id,
+          logThreadId: thread.id,
+          expiryDate: expiryDate, // Only set on create if new
+          username: user.tag
+        }
+      });
+
+    } catch (error) {
+      // Rollback: Hapus channel jika sudah dibuat tapi DB gagal
+      if (channel) {
+        try {
+          await channel.delete('Rollback: Database update failed');
+          Logger.warn(`Rolled back channel ${channel.id} due to DB error`, 'WorkspaceService');
+        } catch (deleteError) {
+          Logger.error(`Failed to rollback channel ${channel.id}`, deleteError, 'WorkspaceService');
+        }
       }
-    });
+      throw error; // Re-throw untuk ditangani caller
+    }
 
-    // 6. Send Dashboard Panel to Channel
+    // 7. Send Dashboard Panel to Channel
     await this.refreshControlPanel(client, user.id); 
     
     return channel;
@@ -157,7 +190,7 @@ export class WorkspaceService {
         });
 
     } catch (e) {
-        console.error('[WorkspaceService] Failed to refresh panel', e);
+        Logger.error('Failed to refresh panel', e, 'WorkspaceService');
     }
   }
 
@@ -170,7 +203,7 @@ export class WorkspaceService {
   }
 
   static async syncPanelsOnStartup(client: Client) {
-      console.log('[WorkspaceService] Syncing control panels...');
+      Logger.info('Syncing control panels...', 'WorkspaceService');
       const users = await prisma.user.findMany({
           where: {
               workspaceChannelId: { not: null }
@@ -182,6 +215,6 @@ export class WorkspaceService {
           // Small delay to avoid rate limits
           await new Promise(r => setTimeout(r, 1000));
       }
-      console.log(`[WorkspaceService] Synced panels for ${users.length} users.`);
+      Logger.info(`Synced panels for ${users.length} users.`, 'WorkspaceService');
   }
 }

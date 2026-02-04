@@ -8,79 +8,77 @@ datasource db {
 }
 
 model User {
-  id                String    @id @map("_id") // Discord User ID (Custom String ID)
-  username          String?
-  balance           Int       @default(0)
-  expiryDate        DateTime?
-  
-  
-  workspaceChannelId String?
-  logThreadId        String?
-  controlPanelMessageId String? // New: Track Control Panel Message
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id         String    @id @map("_id") // Discord User ID (Custom String ID)
+  username   String?
+  balance    Int       @default(0)
+  expiryDate DateTime?
 
-  accounts          Account[]
-  payments          Payment[]
+  workspaceChannelId    String?
+  logThreadId           String?
+  controlPanelMessageId String? // New: Track Control Panel Message
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accounts Account[]
+  payments Payment[]
 }
 
 model Account {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token       String
-  name        String?
-  avatar      String?
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  tasks       Task[]
+  id     String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token  String
+  name   String?
+  avatar String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks Task[]
 }
 
 model Task {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  accountId     String   @db.ObjectId
-  account       Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  
-  guildId       String
-  guildName     String?  // New: Store Server Name
-  channelId     String
-  channelName   String?  // New: Store Channel Name
-  channelSlowmode Int?   // New: Store Slowmode
-  message       String
-  
-  minDelay      Int
-  maxDelay      Int
-  dynamicDelay  Boolean  @default(true)
-  
-  status        String   @default("STOPPED")
-  
-  totalSent     Int      @default(0)
-  lastRun       DateTime?
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  accountId String  @db.ObjectId
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  guildId         String
+  guildName       String? // New: Store Server Name
+  channelId       String
+  channelName     String? // New: Store Channel Name
+  channelSlowmode Int? // New: Store Slowmode
+  message         String
+
+  minDelay     Int
+  maxDelay     Int
+  dynamicDelay Boolean @default(true)
+
+  status String @default("STOPPED")
+
+  totalSent Int       @default(0)
+  lastRun   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Payment {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  externalId  String   @unique
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  amount      Int
-  status      String
+  id         String @id @default(auto()) @map("_id") @db.ObjectId
+  externalId String @unique
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  amount           Int
+  status           String
   invoiceMessageId String?
-  
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model SystemConfig {
-  id             String @id @map("_id") // "main"
+  id             String  @id @map("_id") // "main"
   statsChannelId String?
   statsMessageId String?
 }

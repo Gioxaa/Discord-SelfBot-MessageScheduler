@@ -1,97 +1,119 @@
 import { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuOptionBuilder } from 'discord.js';
-import prisma from '../database/client';
+import { AccountService } from '../services/account.service';
+import { Logger } from '../utils/logger';
 
 export async function renderAccountList(userId: string) {
-    const accounts = await prisma.account.findMany({ where: { userId } });
+    try {
+        const accounts = await AccountService.getByUserId(userId);
 
-    const embed = new EmbedBuilder()
-        .setDescription(`
+        const embed = new EmbedBuilder()
+            .setDescription(`
 ## <a:GREEN_CROWN:1306056562435035190> **ACCOUNT MANAGER** <a:GREEN_CROWN:1306056562435035190>
 \u200b
 **OVERVIEW**
 > <a:arrow:1306059259615903826> Connected Accounts : **${accounts.length}**
 \u200b
 **YOUR ACCOUNTS**
-${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${acc.name || 'Unnamed'}** \n   ID: \`${acc.id.substring(0, 18)}...\``).join('\n') : '> *No accounts connected yet.*'}
+${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${acc.name || 'Unnamed'}** 
+   ID: \`${acc.id.substring(0, 18)}...\``).join('\n') : '> *No accounts connected yet.*'}
 `)
-        .setColor(0x57F287)
-        .setFooter({ text: 'AutoPost | Powered by Frey' })
-        .setTimestamp()
-        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
+            .setColor(0x57F287)
+            .setFooter({ text: 'AutoPost | Powered by Frey' })
+            .setTimestamp()
+            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05');
 
-    const components: any[] = [];
+        const components: ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>[] = [];
 
-    if (accounts.length > 0) {
-        const select = new StringSelectMenuBuilder()
-            .setCustomId('select_manage_account')
-            .setPlaceholder('Select an account to manage');
+        if (accounts.length > 0) {
+            const select = new StringSelectMenuBuilder()
+                .setCustomId('select_manage_account')
+                .setPlaceholder('Select an account to manage');
 
-        accounts.slice(0, 25).forEach(acc => {
-            select.addOptions(
-                new StringSelectMenuOptionBuilder()
-                    .setLabel(acc.name || 'Unnamed Account')
-                    .setValue(acc.id)
-                    .setDescription(`ID: ${acc.id.substring(0, 10)}...`)
+            accounts.slice(0, 25).forEach(acc => {
+                select.addOptions(
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(acc.name || 'Unnamed Account')
+                        .setValue(acc.id)
+                        .setDescription(`ID: ${acc.id.substring(0, 10)}...`)
+                );
+            });
+
+            components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
+        } else {
+            embed.setDescription('You have no connected accounts.');
+        }
+
+        const buttonRow = new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('btn_back_menu')
+                    .setLabel('Back to Menu')
+                    .setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder()
+                    .setCustomId('btn_add_account')
+                    .setLabel('Add New Account')
+                    .setStyle(ButtonStyle.Primary)
             );
-        });
 
-        components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select));
-    } else {
-        embed.setDescription('You have no connected accounts.');
-    }
+        components.push(buttonRow);
 
-    const buttonRow = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('btn_back_menu') // Goes back to Main Control Panel
-                .setLabel('Back to Menu')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('btn_add_account')
-                .setLabel('Add New Account')
-                .setStyle(ButtonStyle.Primary)
-        );
-
-    components.push(buttonRow);
-
-    return { embeds: [embed], components };
-}
-
-export async function renderAccountDetail(accountId: string, status?: { isValid: boolean, username?: string }) {
-    const account = await prisma.account.findUnique({ where: { id: accountId } });
-
-    if (!account) {
+        return { embeds: [embed], components };
+    } catch (error) {
+        Logger.error('Failed to render account list', error, 'AccountView');
         return {
-            content: 'Account not found.',
+            content: '❌ Failed to load accounts. Please try again.',
             embeds: [],
             components: []
         };
     }
+}
 
-    const embed = new EmbedBuilder()
-        .setTitle(`Manage Account: ${account.name}`)
-        .setColor(0x5865F2)
-        .setThumbnail(account.avatar ? `https://cdn.discordapp.com/avatars/${account.id}/${account.avatar}.png` : null)
-        .addFields(
-            { name: 'Account ID', value: `\`${account.id}\``, inline: true },
-            { name: 'Added On', value: `<t:${Math.floor(account.createdAt.getTime() / 1000)}:R>`, inline: true }
-        );
+export async function renderAccountDetail(accountId: string, status?: { isValid: boolean, username?: string }) {
+    try {
+        const account = await AccountService.getById(accountId);
 
-    if (status) {
-        embed.addFields({
-            name: 'Token Status',
-            value: status.isValid
-                ? `[Valid] Logged in as ${status.username}`
-                : `[Invalid] Token expired or flagged`,
-            inline: false
-        });
-        embed.setColor(status.isValid ? 0x57F287 : 0xED4245);
-    } else {
-        embed.addFields({ name: 'Token Status', value: '[Unknown] Click Check Status', inline: false });
-    }
+        if (!account) {
+            return {
+                content: 'Account not found.',
+                embeds: [],
+                components: []
+            };
+        }
 
-    const row = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
+        // Determine status display with emoji
+        let statusDisplay = '<a:arrow:1306059259615903826> Status : **Unknown** *(Click Check Status)*';
+        let statusColor = 0x5865F2;
+
+        if (status) {
+            if (status.isValid) {
+                statusDisplay = `<a:Tick_green:1306061558303952937> Status : **Valid** *(Logged in as ${status.username})*`;
+                statusColor = 0x57F287;
+            } else {
+                statusDisplay = `<a:alert:1306298772124336178> Status : **Invalid** *(Token expired or flagged)*`;
+                statusColor = 0xED4245;
+            }
+        }
+
+        const embed = new EmbedBuilder()
+            .setDescription(`
+## <a:GREEN_CROWN:1306056562435035190> **MANAGE ACCOUNT** <a:GREEN_CROWN:1306056562435035190>
+\u200b
+**ACCOUNT INFO**
+<a:arrow:1306059259615903826> Name : **${account.name}**
+<a:arrow:1306059259615903826> ID : \`${account.id}\`
+<a:arrow:1306059259615903826> Added : <t:${Math.floor(account.createdAt.getTime() / 1000)}:R>
+\u200b
+**TOKEN STATUS**
+${statusDisplay}
+`)
+            .setColor(statusColor)
+            .setThumbnail(account.avatar ? `https://cdn.discordapp.com/avatars/${account.id}/${account.avatar}.png` : null)
+            .setFooter({ text: 'AutoPost | Powered by Frey' })
+            .setTimestamp()
+            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05');
+
+        // Build buttons dynamically
+        const buttons: ButtonBuilder[] = [
             new ButtonBuilder()
                 .setCustomId('btn_account_back')
                 .setLabel('Back to List')
@@ -99,12 +121,36 @@ export async function renderAccountDetail(accountId: string, status?: { isValid:
             new ButtonBuilder()
                 .setCustomId(`btn_check_account_${account.id}`)
                 .setLabel('Check Status')
-                .setStyle(ButtonStyle.Primary),
+                .setStyle(ButtonStyle.Primary)
+        ];
+
+        // CONDITIONAL: Only show Update Token when token is invalid
+        if (status && !status.isValid) {
+            buttons.push(
+                new ButtonBuilder()
+                    .setCustomId(`btn_update_token_${account.id}`)
+                    .setLabel('Update Token')
+                    .setStyle(ButtonStyle.Success)
+            );
+        }
+
+        // Delete always last
+        buttons.push(
             new ButtonBuilder()
                 .setCustomId(`btn_delete_account_${account.id}`)
                 .setLabel('Delete Account')
                 .setStyle(ButtonStyle.Danger)
         );
 
-    return { embeds: [embed], components: [row] };
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons);
+
+        return { embeds: [embed], components: [row] };
+    } catch (error) {
+        Logger.error('Failed to render account detail', error, 'AccountView');
+        return {
+            content: '❌ Failed to load account details. Please try again.',
+            embeds: [],
+            components: []
+        };
+    }
 }

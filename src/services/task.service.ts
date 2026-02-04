@@ -77,4 +77,20 @@ export class TaskService {
             throw error;
         }
     }
+
+    static async getTasksByUserWithDetails(userId: string) {
+        return prisma.task.findMany({
+            where: {
+                account: {
+                    userId: userId
+                }
+            },
+            include: {
+                account: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+    }
 }

@@ -17,7 +17,7 @@ Requires **Kiwi Browser** or **Yandex Browser** (Browsers that support Developer
 <a:alert:1306298772124336178> **SECURITY WARNING**
 Your Token is your account password. **NEVER** share it with anyone else. We encrypt it for safety, but you must keep it secret.
 `)
-        .setColor('#5865F2')
+        .setColor(0x5865F2)
         .setFooter({ text: 'AutoPost | Powered by Frey' })
         .setTimestamp();
 
@@ -46,7 +46,7 @@ export function renderTutorialPC() {
 <a:arrow:1306059259615903826> **Paste** the code below and press **Enter**.
 <a:arrow:1306059259615903826> Your token will appear (text inside quotes \`"..."\`).
 `)
-        .setColor('#5865F2');
+        .setColor(0x5865F2);
 
     return { 
         content: `\`\`\`js\n${GET_TOKEN_SCRIPT}\n\`\`\``, 
@@ -68,7 +68,7 @@ export function renderTutorialAndroid() {
 <a:arrow:1306059259615903826> Go to the **Console** tab.
 <a:arrow:1306059259615903826> **Paste** the code below and press enter.
 `)
-        .setColor('#57F287');
+        .setColor(0x57F287);
 
     return { 
         content: `\`\`\`js\n${GET_TOKEN_SCRIPT}\n\`\`\``, 

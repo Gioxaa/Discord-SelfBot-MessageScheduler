@@ -3,7 +3,6 @@ import axios from 'axios';
 import prisma from '../database/client';
 import { User, Client } from 'discord.js';
 import { config, PRODUCTS } from '../config';
-import { AdminService } from './admin.service';
 import { WorkspaceService } from './workspace.service';
 import { renderPaymentSuccess } from '../views/payment.view';
 
@@ -42,38 +41,42 @@ export class PaymentService {
                 }
             }
 
-            // 1. Ensure User Exists & Check Pending
-            await prisma.user.upsert({
-                where: { id: user.id },
-                update: { username: user.username },
-                create: {
-                    id: user.id,
-                    username: user.username || 'Unknown'
+            // 1. Ensure User Exists & Check Pending with Transaction to prevent race condition
+            const transaction = await prisma.$transaction(async (tx) => {
+                await tx.user.upsert({
+                    where: { id: user.id },
+                    update: { username: user.username },
+                    create: {
+                        id: user.id,
+                        username: user.username || 'Unknown'
+                    }
+                });
+
+                const pendingTx = await tx.payment.findFirst({
+                    where: { userId: user.id, status: 'PENDING' }
+                });
+
+                if (pendingTx) {
+                    throw new Error(`You have a pending transaction (ID: ${pendingTx.externalId}). Please pay or cancel it first.`);
                 }
+
+                // Create Pending Record in DB
+                Logger.info('[Payment] Creating DB Record...', 'PaymentService');
+                const newTransaction = await tx.payment.create({
+                    data: {
+                        userId: user.id,
+                        amount: product.price,
+                        status: 'PENDING',
+                        externalId: `TRX-${Date.now()}-${user.id.substring(0, 4)}`
+                    }
+                });
+                
+                return newTransaction;
             });
 
-            const pendingTx = await prisma.payment.findFirst({
-                where: { userId: user.id, status: 'PENDING' }
-            });
-
-            if (pendingTx) {
-                // Return special error to trigger Cancel button
-                throw new Error(`You have a pending transaction (ID: ${pendingTx.externalId}). Please pay or cancel it first.`);
-            }
-
-            // 1. Create Pending Record in DB
-            Logger.info('[Payment] Creating DB Record...', 'PaymentService');
-            const transaction = await prisma.payment.create({
-                data: {
-                    userId: user.id,
-                    amount: product.price,
-                    status: 'PENDING',
-                    externalId: `TRX-${Date.now()}-${user.id.substring(0, 4)}`
-                }
-            });
             Logger.info(`[Payment] DB Record Created: ${transaction.id}`, 'PaymentService');
 
-            // 2. Request to PaKasir
+            // 2. Request to PaKasir dengan timeout 10 detik
             const payload = {
                 project: config.pakasir.projectSlug,
                 order_id: transaction.id,
@@ -83,7 +86,8 @@ export class PaymentService {
 
             Logger.info('[Payment] Sending request to PaKasir...', 'PaymentService');
             const response = await axios.post(`${config.pakasir.apiUrl}/transactioncreate/qris`, payload, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 10000 // 10 detik timeout
             });
 
             // Safer check for response data
@@ -159,7 +163,7 @@ export class PaymentService {
                 headers: { 'Content-Type': 'application/json' }
             });
         } catch (e: any) {
-            console.error('[PaymentService] Failed to cancel at Gateway:', e.response?.data || e.message);
+            Logger.error('Failed to cancel at Gateway', e, 'PaymentService');
             // We continue to mark as cancelled locally so user is not stuck, 
             // but log the error. In strict mode we might throw.
         }
@@ -179,10 +183,11 @@ export class PaymentService {
         if (transaction.status === 'PAID') return 'PAID';
         if (transaction.status === 'CANCELLED') return 'CANCELLED';
 
-        // Manual Check to PaKasir
+        // Manual Check to PaKasir dengan timeout 10 detik
         try {
             const response = await axios.get(`${config.pakasir.apiUrl}/transaction/${transaction.id}`, {
-                headers: { 'Authorization': `Bearer ${config.pakasir.apiKey}` }
+                headers: { 'Authorization': `Bearer ${config.pakasir.apiKey}` },
+                timeout: 10000 // 10 detik timeout
             });
 
             const data = response.data.data || response.data;
@@ -192,6 +197,7 @@ export class PaymentService {
             }
         } catch (e) {
             // Silent fail on API check
+            Logger.debug(`Transaction status check failed for ${transaction.id}: ${e instanceof Error ? e.message : 'Unknown error'}`, 'PaymentService');
         }
 
         return 'PENDING';
@@ -217,22 +223,46 @@ export class PaymentService {
     }
 
     static async processSuccessfulPayment(transaction: any, client: Client) {
-        // 1. Update Status
-        await prisma.payment.update({
-            where: { id: transaction.id },
-            data: { status: 'PAID' }
+        // Cari product yang cocok dengan amount
+        const product = Object.values(PRODUCTS).find(p => p.price === transaction.amount);
+        const days = product ? product.durationDays : 7; // Default 7 hari jika tidak match
+
+        // 1. Update Payment Status dan Add Time dalam satu transaction
+        await prisma.$transaction(async (tx) => {
+            // Update Payment Status
+            await tx.payment.update({
+                where: { id: transaction.id },
+                data: { status: 'PAID' }
+            });
+
+            // Add Time to User
+            const user = await tx.user.findUnique({ where: { id: transaction.userId } });
+            if (user) {
+                const now = new Date();
+                const currentExpiry = user.expiryDate && user.expiryDate > now ? user.expiryDate : now;
+                const newExpiry = new Date(currentExpiry);
+                newExpiry.setDate(newExpiry.getDate() + days);
+
+                await tx.user.update({
+                    where: { id: transaction.userId },
+                    data: { expiryDate: newExpiry }
+                });
+            }
         });
 
-        // 2. Add Time
-        const days = transaction.amount >= 30000 ? 30 : 7;
-        await AdminService.addTime(transaction.userId, days);
-
-        // 3. Ensure Workspace Exists
+        Logger.info(`[Payment] Transaction ${transaction.id} marked as PAID, added ${days} days`, 'PaymentService');
+        
+        // 2. Ensure Workspace Exists (outside transaction - Discord API call)
         if (config.guildId) {
-            await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId);
+            try {
+                await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId);
+            } catch (wsError) {
+                Logger.error(`[Payment] Failed to create workspace for ${transaction.userId}`, wsError, 'PaymentService');
+                // Don't throw - payment was successful, workspace creation is secondary
+            }
         }
 
-        // 4. Update Invoice Message (DM) to Success
+        // 3. Update Invoice Message (DM) to Success
         if (transaction.invoiceMessageId) {
             try {
                 const user = await client.users.fetch(transaction.userId);
@@ -240,9 +270,7 @@ export class PaymentService {
                 const msg = await dmChannel.messages.fetch(transaction.invoiceMessageId);
                 
                 if (msg) {
-                    const product = Object.values(PRODUCTS).find(p => p.price === transaction.amount);
                     const productName = product ? product.name : 'Premium Plan';
-
                     const successView = renderPaymentSuccess(productName, transaction.amount, transaction.id);
                     await msg.edit(successView);
                     Logger.info(`[Payment] Updated DM Invoice for ${transaction.userId}`, 'PaymentService');

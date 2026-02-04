@@ -17,6 +17,17 @@ export class StatsService {
         }, 15000); // 15 seconds
     }
 
+    /**
+     * Stop auto-refresh interval (untuk graceful shutdown)
+     */
+    static stopAutoRefresh(): void {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+            Logger.info('Stopped Global Stats Auto-Refresh', 'StatsService');
+        }
+    }
+
     static async refreshStats(client: Client) {
         try {
             const config = await prisma.systemConfig.findUnique({ where: { id: 'main' } });

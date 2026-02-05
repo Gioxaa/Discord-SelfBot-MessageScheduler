@@ -391,16 +391,38 @@ async function processTask(taskId: string) {
         if (config.message) {
             const chunks = smartSplit(config.message);
             for (const chunk of chunks) {
+                // CHECK 1: Before typing - cek apakah task masih aktif
+                if (!activeTasks.has(taskId)) {
+                    log(`[Task ${taskId}] Stopped before typing`);
+                    return;
+                }
+
                 const typingDuration = Math.min(chunk.length * 50, 10000); 
                 if (channel.sendTyping) {
                     await channel.sendTyping();
+                    
+                    // CHECK 2: After typing, before delay
+                    if (!activeTasks.has(taskId)) {
+                        log(`[Task ${taskId}] Stopped after typing`);
+                        return;
+                    }
+                    
                     await new Promise(resolve => setTimeout(resolve, typingDuration));
                 }
                 
-                // Check if still running before sending
-                if (!activeTasks.has(taskId)) return;
+                // CHECK 3: Before sending
+                if (!activeTasks.has(taskId)) {
+                    log(`[Task ${taskId}] Stopped before send`);
+                    return;
+                }
 
                 const sentMsg = await channel.send(chunk);
+                
+                // CHECK 4: After sending, before log
+                if (!activeTasks.has(taskId)) {
+                    log(`[Task ${taskId}] Stopped after send`);
+                    return;
+                }
                 
                 if (parentPort && chunk === chunks[chunks.length - 1]) {
                     parentPort.postMessage({
@@ -412,7 +434,15 @@ async function processTask(taskId: string) {
                         nextDelay: delay
                     });
                 }
-                if (chunks.length > 1) await new Promise(r => setTimeout(r, 1000));
+                
+                if (chunks.length > 1) {
+                    // CHECK 5: Before inter-chunk delay
+                    if (!activeTasks.has(taskId)) {
+                        log(`[Task ${taskId}] Stopped before inter-chunk delay`);
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, 1000));
+                }
             }
         }
         

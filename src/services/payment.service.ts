@@ -185,15 +185,24 @@ export class PaymentService {
 
         // Manual Check to PaKasir dengan timeout 10 detik
         try {
-            const response = await axios.get(`${config.pakasir.apiUrl}/transaction/${transaction.id}`, {
-                headers: { 'Authorization': `Bearer ${config.pakasir.apiKey}` },
+            const response = await axios.get(`${config.pakasir.apiUrl}/transactiondetail`, {
+                params: {
+                    project: config.pakasir.projectSlug,
+                    order_id: transactionId,
+                    amount: transaction.amount,
+                    api_key: config.pakasir.apiKey
+                },
                 timeout: 10000 // 10 detik timeout
             });
 
-            const data = response.data.data || response.data;
+            const data = response.data?.transaction || response.data?.data || response.data;
             if (data.status === 'success' || data.status === 'completed' || data.payment_status === 'paid') {
-                await this.processSuccessfulPayment(transaction, client);
-                return 'PAID';
+                // Gunakan handleWebhook yang sudah atomic untuk mencegah race condition
+                const result = await this.handleWebhook(
+                    { order_id: transactionId, status: 'completed' }, 
+                    client
+                );
+                return result.status === 'SUCCESS' || result.status === 'ALREADY_PROCESSED' ? 'PAID' : 'PENDING';
             }
         } catch (e) {
             // Silent fail on API check
@@ -206,40 +215,40 @@ export class PaymentService {
     static async handleWebhook(payload: any, client: Client) {
         const { order_id, status } = payload;
 
-        let transaction = await prisma.payment.findUnique({
-            where: { id: order_id },
-            include: { user: true }
-        });
+        // Gunakan transaction dengan atomic check-and-update untuk mencegah race condition
+        const result = await prisma.$transaction(async (tx) => {
+            const transaction = await tx.payment.findUnique({
+                where: { id: order_id },
+                include: { user: true }
+            });
 
-        if (!transaction) throw new Error(`Transaction not found: ${order_id}`);
-        if (transaction.status === 'PAID') return { status: 'ALREADY_PROCESSED', transaction };
+            if (!transaction) throw new Error(`Transaction not found: ${order_id}`);
+            
+            // Check INSIDE transaction - atomic, mencegah double payment
+            if (transaction.status === 'PAID') {
+                return { status: 'ALREADY_PROCESSED' as const, transaction, days: 0 };
+            }
 
-        if (status === 'completed' || status === 'success') {
-            await this.processSuccessfulPayment(transaction, client);
-            return { status: 'SUCCESS', transaction };
-        }
+            if (status !== 'completed' && status !== 'success') {
+                return { status: 'IGNORED' as const, transaction, days: 0 };
+            }
 
-        return { status: 'IGNORED', transaction };
-    }
+            // Process payment atomically
+            const product = Object.values(PRODUCTS).find(p => p.price === transaction.amount);
+            const days = product ? product.durationDays : 7;
 
-    static async processSuccessfulPayment(transaction: any, client: Client) {
-        // Cari product yang cocok dengan amount
-        const product = Object.values(PRODUCTS).find(p => p.price === transaction.amount);
-        const days = product ? product.durationDays : 7; // Default 7 hari jika tidak match
-
-        // 1. Update Payment Status dan Add Time dalam satu transaction
-        await prisma.$transaction(async (tx) => {
-            // Update Payment Status
+            // Update payment status
             await tx.payment.update({
                 where: { id: transaction.id },
                 data: { status: 'PAID' }
             });
 
-            // Add Time to User
-            const user = await tx.user.findUnique({ where: { id: transaction.userId } });
-            if (user) {
+            // Update user expiry dalam transaction yang sama
+            if (transaction.user) {
                 const now = new Date();
-                const currentExpiry = user.expiryDate && user.expiryDate > now ? user.expiryDate : now;
+                const currentExpiry = transaction.user.expiryDate && transaction.user.expiryDate > now 
+                    ? transaction.user.expiryDate 
+                    : now;
                 const newExpiry = new Date(currentExpiry);
                 newExpiry.setDate(newExpiry.getDate() + days);
 
@@ -248,21 +257,34 @@ export class PaymentService {
                     data: { expiryDate: newExpiry }
                 });
             }
+
+            return { status: 'SUCCESS' as const, transaction, days };
         });
 
-        Logger.info(`[Payment] Transaction ${transaction.id} marked as PAID, added ${days} days`, 'PaymentService');
-        
-        // 2. Ensure Workspace Exists (outside transaction - Discord API call)
+        // Side effects di luar transaction (Discord API calls)
+        if (result.status === 'SUCCESS') {
+            Logger.info(`[Payment] Transaction ${result.transaction.id} marked as PAID, added ${result.days} days`, 'PaymentService');
+            await this.handlePostPaymentSideEffects(result.transaction, client, result.days);
+        }
+
+        return result;
+    }
+
+    /**
+     * Handle side effects setelah payment sukses (Discord API calls)
+     * Dipisah dari transaction karena external API tidak boleh di dalam DB transaction
+     */
+    private static async handlePostPaymentSideEffects(transaction: any, client: Client, days: number) {
+        // 1. Ensure Workspace Exists
         if (config.guildId) {
             try {
                 await WorkspaceService.createWorkspace(client, config.guildId, transaction.userId);
             } catch (wsError) {
                 Logger.error(`[Payment] Failed to create workspace for ${transaction.userId}`, wsError, 'PaymentService');
-                // Don't throw - payment was successful, workspace creation is secondary
             }
         }
 
-        // 3. Update Invoice Message (DM) to Success
+        // 2. Update Invoice Message (DM) to Success
         if (transaction.invoiceMessageId) {
             try {
                 const user = await client.users.fetch(transaction.userId);
@@ -270,6 +292,7 @@ export class PaymentService {
                 const msg = await dmChannel.messages.fetch(transaction.invoiceMessageId);
                 
                 if (msg) {
+                    const product = Object.values(PRODUCTS).find(p => p.durationDays === days);
                     const productName = product ? product.name : 'Premium Plan';
                     const successView = renderPaymentSuccess(productName, transaction.amount, transaction.id);
                     await msg.edit(successView);
@@ -279,5 +302,13 @@ export class PaymentService {
                 Logger.warn(`[Payment] Failed to update DM Invoice for ${transaction.userId}`, 'PaymentService');
             }
         }
+    }
+
+    /**
+     * @deprecated Use handleWebhook instead - kept for backward compatibility
+     */
+    static async processSuccessfulPayment(transaction: any, client: Client) {
+        // Delegate ke handleWebhook untuk konsistensi dan atomic operation
+        return this.handleWebhook({ order_id: transaction.id, status: 'completed' }, client);
     }
 }

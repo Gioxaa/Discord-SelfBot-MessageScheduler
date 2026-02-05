@@ -134,6 +134,7 @@ export class WorkerService {
 
     /**
      * Menghentikan task yang sedang berjalan
+     * Menggunakan lock untuk mencegah race condition dengan startTask
      */
     static async stopTask(client: Client, taskId: string, reason?: string): Promise<void> {
         const task = await prisma.task.findUnique({
@@ -144,61 +145,70 @@ export class WorkerService {
         if (!task) return;
 
         const accountId = task.account.id;
-        const worker = this.workers.get(accountId);
 
-        // Update DB first
-        await prisma.task.update({
-            where: { id: taskId },
-            data: { status: 'STOPPED' }
-        });
+        // Acquire lock untuk mencegah race condition dengan startTask
+        await this.acquireLock(accountId);
 
-        // Send notification jika ada reason
-        if (reason) {
-            await this.forwardLog(client, task.account.userId, {
-                status: 'error',
-                content: `Task Stopped: ${reason}`,
-                url: null,
-                nextDelay: 0
+        try {
+            const worker = this.workers.get(accountId);
+
+            // Update DB first
+            await prisma.task.update({
+                where: { id: taskId },
+                data: { status: 'STOPPED' }
             });
-        }
 
-        if (worker) {
-            worker.postMessage({ type: 'STOP_TASK', taskId });
+            // Send notification jika ada reason
+            if (reason) {
+                await this.forwardLog(client, task.account.userId, {
+                    status: 'error',
+                    content: `Task Stopped: ${reason}`,
+                    url: null,
+                    nextDelay: 0
+                });
+            }
 
-            // Remove dari registry
-            const tasks = this.activeAccountTasks.get(accountId);
-            if (tasks) {
-                tasks.delete(taskId);
+            if (worker) {
+                worker.postMessage({ type: 'STOP_TASK', taskId });
 
-                // Jika tidak ada task lagi, masuk mode IDLE
-                if (tasks.size === 0) {
-                    // Safety Check: Double check DB
-                    const runningCount = await prisma.task.count({
-                        where: { accountId: accountId, status: 'RUNNING' }
-                    });
+                // Remove dari registry
+                const tasks = this.activeAccountTasks.get(accountId);
+                if (tasks) {
+                    tasks.delete(taskId);
 
-                    if (runningCount > 0) {
-                        Logger.warn(`Sync Mismatch: Memory says 0 tasks, but DB says ${runningCount} running for Account ${accountId}`, 'WorkerService');
-                        return;
+                    // Jika tidak ada task lagi, masuk mode IDLE
+                    if (tasks.size === 0) {
+                        // Safety Check: Double check DB
+                        const runningCount = await prisma.task.count({
+                            where: { accountId: accountId, status: 'RUNNING' }
+                        });
+
+                        if (runningCount > 0) {
+                            Logger.warn(`Sync Mismatch: Memory says 0 tasks, but DB says ${runningCount} running for Account ${accountId}`, 'WorkerService');
+                            return;
+                        }
+
+                        Logger.debug(`Account ${accountId} has no active tasks. Entering IDLE mode...`, 'WorkerService');
+
+                        if (this.idleTimers.has(accountId)) {
+                            clearTimeout(this.idleTimers.get(accountId)!);
+                        }
+
+                        const timer = setTimeout(() => {
+                            Logger.info(`Idle timeout reached for Account ${accountId}. Terminating worker.`, 'WorkerService');
+                            this.terminateAccount(accountId);
+                        }, this.IDLE_TIMEOUT_MS);
+
+                        this.idleTimers.set(accountId, timer);
                     }
-
-                    Logger.debug(`Account ${accountId} has no active tasks. Entering IDLE mode...`, 'WorkerService');
-
-                    if (this.idleTimers.has(accountId)) {
-                        clearTimeout(this.idleTimers.get(accountId)!);
-                    }
-
-                    const timer = setTimeout(() => {
-                        Logger.info(`Idle timeout reached for Account ${accountId}. Terminating worker.`, 'WorkerService');
-                        this.terminateAccount(accountId);
-                    }, this.IDLE_TIMEOUT_MS);
-
-                    this.idleTimers.set(accountId, timer);
                 }
             }
-        }
 
-        await WorkspaceService.refreshControlPanel(client, task.account.userId);
+            await WorkspaceService.refreshControlPanel(client, task.account.userId);
+        } finally {
+            // Always release lock
+            this.releaseLock(accountId);
+        }
     }
 
     /**

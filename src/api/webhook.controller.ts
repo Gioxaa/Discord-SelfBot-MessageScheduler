@@ -26,10 +26,6 @@ export class WebhookController {
                 Logger.info('Transaction already processed (preventing duplicate)', 'Webhook');
             } else if (result.status === 'IGNORED') {
                 Logger.debug(`Ignored payment status: ${status}`, 'Webhook');
-            } else if (result.status === 'INVALID') {
-                Logger.warn(`Invalid webhook status received: ${status}`, 'Webhook');
-                res.status(400).send('Invalid Payment Status');
-                return;
             }
             
             res.status(200).send('OK');

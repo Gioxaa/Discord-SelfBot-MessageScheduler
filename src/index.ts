@@ -24,10 +24,49 @@ const client = new Client({
 // HTTP Server instance for graceful shutdown
 let httpServer: Server | null = null;
 
+// Shutdown function - exposed for global exception handlers
+let shutdown: ((signal: string) => Promise<void>) | null = null;
+
 // Register Events
 client.once(Events.ClientReady, onReady);
 client.on(Events.InteractionCreate, onInteractionCreate);
 client.on(Events.MessageCreate, onMessageCreate);
+
+// ==================== GLOBAL EXCEPTION HANDLERS ====================
+
+// Unhandled Promise Rejection - Log tapi jangan crash
+process.on('unhandledRejection', (reason, promise) => {
+    Logger.error('Unhandled Promise Rejection', { reason, promise }, 'System');
+    // Tidak exit - biarkan process tetap jalan, tapi log untuk debugging
+});
+
+// Uncaught Exception - Log dan graceful shutdown karena state mungkin corrupted
+process.on('uncaughtException', async (error) => {
+    Logger.error('Uncaught Exception - Initiating graceful shutdown', error, 'System');
+    
+    // Coba graceful shutdown jika sudah tersedia
+    if (shutdown) {
+        try {
+            await shutdown('UNCAUGHT_EXCEPTION');
+        } catch (e) {
+            Logger.error('Failed to graceful shutdown after uncaught exception', e, 'System');
+            process.exit(1);
+        }
+    } else {
+        // Belum ready, langsung exit
+        process.exit(1);
+    }
+});
+
+// Process Warning - Log untuk memory leak detection dll
+process.on('warning', (warning) => {
+    Logger.warn(`Process Warning: ${warning.name} - ${warning.message}`, 'System');
+    if (warning.stack) {
+        Logger.debug(`Warning Stack: ${warning.stack}`, 'System');
+    }
+});
+
+// ==================== MAIN FUNCTION ====================
 
 async function main() {
     try {
@@ -41,8 +80,8 @@ async function main() {
 
         await client.login(config.botToken);
 
-        // Graceful Shutdown Handler
-        const shutdown = async (signal: string) => {
+        // Graceful Shutdown Handler - assign ke global untuk exception handlers
+        shutdown = async (signal: string) => {
             Logger.info(`Received ${signal}. Shutting down gracefully...`, 'System');
 
             try {
@@ -84,8 +123,8 @@ async function main() {
             }
         };
 
-        process.on('SIGINT', () => shutdown('SIGINT'));
-        process.on('SIGTERM', () => shutdown('SIGTERM'));
+        process.on('SIGINT', () => shutdown!('SIGINT'));
+        process.on('SIGTERM', () => shutdown!('SIGTERM'));
 
     } catch (error) {
         Logger.error('Fatal Error during startup', error, 'System');

@@ -1,6 +1,7 @@
-import { Client } from 'discord.js-selfbot-v13';
+import { Client, TextChannel, ThreadChannel, DMChannel, NewsChannel, Collection } from 'discord.js-selfbot-v13';
 import { parentPort, workerData } from 'worker_threads';
 import { smartSplit } from '../utils/textSplitter';
+import { TaskConfig } from '../interfaces/worker';
 
 // Interface for Worker Data
 interface WorkerPayload {
@@ -23,7 +24,7 @@ const mode = payload.mode || 'RUN';
 const client = new Client({
   checkUpdate: false,
   partials: ['CHANNEL', 'MESSAGE', 'USER', 'GUILD_MEMBER', 'REACTION'],
-  makeCache: (manager: any) => {
+  makeCache: (manager: { name: string }) => {
       const LimitedCollection = require('discord.js-selfbot-v13').LimitedCollection;
       
       // Managers to DISABLE caching for (Memory Hogs)
@@ -67,8 +68,9 @@ async function fetchGuilds() {
         }));
         if (parentPort) parentPort.postMessage({ type: 'data', data: guilds });
         process.exit(0);
-    } catch (e: any) {
-        error(`Failed to fetch guilds: ${e.message}`);
+    } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        error(`Failed to fetch guilds: ${errorMessage}`);
         process.exit(1);
     }
 }
@@ -88,8 +90,9 @@ async function fetchChannels() {
             }));
         if (parentPort) parentPort.postMessage({ type: 'data', data: channels });
         process.exit(0);
-    } catch (e: any) {
-        error(`Failed to fetch channels: ${e.message}`);
+    } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        error(`Failed to fetch channels: ${errorMessage}`);
         process.exit(1);
     }
 }
@@ -132,8 +135,9 @@ async function fetchContext() {
             });
         }
         process.exit(0);
-    } catch (e: any) {
-        error(`Failed to fetch context: ${e.message}`);
+    } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        error(`Failed to fetch context: ${errorMessage}`);
         process.exit(1);
     }
 }
@@ -143,11 +147,14 @@ async function runPreview() {
         let targetId = payload.threadId || payload.channelId;
         if (!targetId) throw new Error('Target ID required for preview');
         
-        let target: any;
+        let target: TextChannel | ThreadChannel | DMChannel | NewsChannel | null = null;
 
         // 1. Try to find the channel/thread in cache or fetch it
         try {
-            target = await client.channels.fetch(targetId);
+            const fetched = await client.channels.fetch(targetId);
+            if (fetched && fetched.isText()) {
+                target = fetched as TextChannel | ThreadChannel | DMChannel | NewsChannel;
+            }
         } catch (e) {
             // Failed to fetch. Maybe not in server?
         }
@@ -171,9 +178,13 @@ async function runPreview() {
                 await new Promise(r => setTimeout(r, 3000));
                 
                 // Try fetching again
-                target = await client.channels.fetch(targetId);
-            } catch (e: any) {
-                error(`[Preview] Failed to join server: ${e.message}`);
+                const refetched = await client.channels.fetch(targetId);
+                if (refetched && refetched.isText()) {
+                    target = refetched as TextChannel | ThreadChannel | DMChannel | NewsChannel;
+                }
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                error(`[Preview] Failed to join server: ${errorMessage}`);
                 process.exit(1);
             }
         }
@@ -196,8 +207,9 @@ async function runPreview() {
         if (parentPort) parentPort.postMessage({ type: 'data', data: 'success' });
         process.exit(0);
 
-    } catch (e: any) {
-        error(`[Preview] Error: ${e.message}`);
+    } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        error(`[Preview] Error: ${errorMessage}`);
         process.exit(1);
     }
 }
@@ -233,7 +245,7 @@ function error(msg: string) {
 // Active Tasks Registry
 const activeTasks = new Map<string, { 
     timeout: NodeJS.Timeout | null, 
-    config: any, 
+    config: TaskConfig, 
     channelFetchRetries: number // Track retry count per task
 }>();
 
@@ -312,12 +324,15 @@ async function processTask(taskId: string) {
     if (!task) return;
 
     const { config } = task;
-    let channel: any = client.channels.cache.get(config.channelId);
+    let channel: TextChannel | ThreadChannel | null = client.channels.cache.get(config.channelId) as TextChannel | ThreadChannel | undefined ?? null;
 
     // Try fetching if not in cache (First time)
     if (!channel) {
         try {
-            channel = await client.channels.fetch(config.channelId);
+            const fetched = await client.channels.fetch(config.channelId);
+            if (fetched && fetched.isText()) {
+                channel = fetched as TextChannel | ThreadChannel;
+            }
             // Reset retry counter on success
             task.channelFetchRetries = 0;
         } catch (e) {
@@ -364,10 +379,11 @@ async function processTask(taskId: string) {
     task.channelFetchRetries = 0;
 
     // Metadata Self-Healing
-    if (parentPort && (channel.type === 'GUILD_TEXT' || channel.type === 'GUILD_NEWS' || channel.isThread())) {
+    if (parentPort && (channel.type === 'GUILD_TEXT' || channel.isThread())) {
         try {
-           const guildName = (channel as any).guild?.name || 'Unknown Server';
-           const channelName = (channel as any).name || 'Unknown Channel';
+           const textChannel = channel as TextChannel;
+           const guildName = textChannel.guild?.name || 'Unknown Server';
+           const channelName = textChannel.name || 'Unknown Channel';
            parentPort.postMessage({ 
                type: 'metadata',
                taskId, // Include taskId
@@ -451,16 +467,18 @@ async function processTask(taskId: string) {
             task.timeout = setTimeout(() => processTask(taskId), delay);
         }
 
-    } catch (err: any) {
-        if (err.code === 429) {
-            const retryAfter = err.retryAfter || 5000;
+    } catch (err: unknown) {
+        const discordError = err as { code?: number; retryAfter?: number; message?: string };
+        if (discordError.code === 429) {
+            const retryAfter = discordError.retryAfter || 5000;
             error(`[Task ${taskId}] Rate Limit. Waiting ${retryAfter}ms...`);
             if (activeTasks.has(taskId)) {
                 task.timeout = setTimeout(() => processTask(taskId), retryAfter + 1000);
             }
             return;
         }
-        error(`[Task ${taskId}] Failed to send: ${err.message}`);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        error(`[Task ${taskId}] Failed to send: ${errorMessage}`);
         // Retry delay on error
         if (activeTasks.has(taskId)) {
             task.timeout = setTimeout(() => processTask(taskId), 20000); 

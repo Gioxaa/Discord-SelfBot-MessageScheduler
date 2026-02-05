@@ -1,3 +1,4 @@
+import { WorkerGuild, WorkerChannel } from '../interfaces/worker';
 import { ButtonInteraction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { PaymentService } from '../services/payment.service';
 import { WorkerService } from '../services/worker.service';
@@ -124,9 +125,10 @@ export async function handleButton(interaction: ButtonInteraction) {
                     });
                 }
 
-            } catch (e: any) {
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
                 // If pending error, offer Cancel button
-                if (e.message.includes('pending transaction') || e.message.includes('Please pay or cancel')) {
+                if (errorMessage.includes('pending transaction') || errorMessage.includes('Please pay or cancel')) {
                     const pending = await prisma.payment.findFirst({
                         where: { userId: interaction.user.id, status: 'PENDING' }
                     });
@@ -139,11 +141,11 @@ export async function handleButton(interaction: ButtonInteraction) {
                                 .setStyle(ButtonStyle.Danger)
                                 .setEmoji('🗑️')
                         );
-                        await interaction.editReply({ content: `❌ ${e.message}`, components: [row] });
+                        await interaction.editReply({ content: `❌ ${errorMessage}`, components: [row] });
                         return;
                     }
                 }
-                await interaction.editReply({ content: `❌ Payment Error: ${e.message}` });
+                await interaction.editReply({ content: `❌ Payment Error: ${errorMessage}` });
             }
         }
 
@@ -173,8 +175,9 @@ export async function handleButton(interaction: ButtonInteraction) {
                 } else {
                     await interaction.followUp({ content: 'Status: PENDING. Please complete payment or wait a moment.', ephemeral: true });
                 }
-            } catch (e: any) {
-                await interaction.followUp({ content: `Check Failed: ${e.message}`, ephemeral: true });
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                await interaction.followUp({ content: `Check Failed: ${errorMessage}`, ephemeral: true });
             }
         }
 
@@ -216,8 +219,9 @@ export async function handleButton(interaction: ButtonInteraction) {
                     } catch (ignore) { /* Message might be deleted */ }
                 }
 
-            } catch (e: any) {
-                await interaction.followUp({ content: `Failed to cancel: ${e.message}`, ephemeral: true });
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                await interaction.followUp({ content: `Failed to cancel: ${errorMessage}`, ephemeral: true });
             }
         }
 
@@ -314,7 +318,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                 .setCustomId(`select_guild_task_${accountId}`)
                 .setPlaceholder(`Select a server (Page ${page + 1})`)
                 .addOptions(
-                    slicedGuilds.map((g: any) => ({
+                    slicedGuilds.map((g: WorkerGuild) => ({
                         label: g.name.substring(0, 100),
                         value: g.id,
                         description: `ID: ${g.id}`
@@ -358,7 +362,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                 .setCustomId(`select_guild_task_${accountId}`)
                 .setPlaceholder(selectPlaceholder)
                 .addOptions(
-                    slicedGuilds.map((g: any) => ({
+                    slicedGuilds.map((g: WorkerGuild) => ({
                         label: g.name.substring(0, 100),
                         value: g.id,
                         description: `ID: ${g.id}`
@@ -420,7 +424,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                 .setCustomId(`select_channel_task_${accountId}_${guildId}`)
                 .setPlaceholder(selectPlaceholder)
                 .addOptions(
-                    slicedChannels.map((c: any) => ({
+                    slicedChannels.map((c: WorkerChannel) => ({
                         label: c.name.substring(0, 50),
                         value: `${c.id}|${c.rateLimitPerUser}`,
                         description: `Slowmode: ${c.rateLimitPerUser}s`
@@ -676,7 +680,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                     .setCustomId(`select_guild_task_${accountId}`)
                     .setPlaceholder(`Select a server (Page 1/${totalPages})`)
                     .addOptions(
-                        slicedGuilds.map((g: any) => ({
+                        slicedGuilds.map((g: WorkerGuild) => ({
                             label: g.name.substring(0, 100),
                             value: g.id,
                             description: `ID: ${g.id}`
@@ -725,8 +729,9 @@ export async function handleButton(interaction: ButtonInteraction) {
                     ]
                 });
 
-            } catch (error: any) {
-                await interaction.editReply({ content: `❌ Failed to fetch servers: ${error.message}`, embeds: [], components: [] });
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await interaction.editReply({ content: `❌ Failed to fetch servers: ${errorMessage}`, embeds: [], components: [] });
             }
         }
 
@@ -781,7 +786,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                     .setCustomId(`select_channel_task_${accountId}_${guildId}`)
                     .setPlaceholder(`Choose a channel (Page 1/${totalPages})`)
                     .addOptions(
-                        slicedChannels.map((c: any) => ({
+                        slicedChannels.map((c: WorkerChannel) => ({
                             label: c.name.substring(0, 50),
                             value: `${c.id}|${c.rateLimitPerUser}`,
                             description: `Slowmode: ${c.rateLimitPerUser}s`
@@ -829,8 +834,9 @@ export async function handleButton(interaction: ButtonInteraction) {
                     ]
                 });
 
-            } catch (error: any) {
-                await interaction.editReply({ content: `❌ Failed to fetch channels: ${error.message}`, embeds: [], components: [] });
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await interaction.editReply({ content: `❌ Failed to fetch channels: ${errorMessage}`, embeds: [], components: [] });
             }
         }
 
@@ -904,7 +910,8 @@ export async function handleButton(interaction: ButtonInteraction) {
                         components: [panel.row, panel.editRow] 
                     });
                 }
-            } catch (e: any) {
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
                 // 4. Failed: Revert to STOPPED (or previous state) and show error
                 const failedTask = await TaskService.getById(taskId);
                 if (failedTask) {
@@ -914,7 +921,7 @@ export async function handleButton(interaction: ButtonInteraction) {
                         components: [panel.row, panel.editRow] 
                     });
                 }
-                await interaction.followUp({ content: `❌ Start Failed: ${e.message}`, flags: MessageFlags.Ephemeral });
+                await interaction.followUp({ content: `❌ Start Failed: ${errorMessage}`, flags: MessageFlags.Ephemeral });
             }
         }
         else if (customId.startsWith('btn_delete_task_')) {
@@ -1040,9 +1047,10 @@ export async function handleButton(interaction: ButtonInteraction) {
                     embeds: [embed]
                 });
 
-            } catch (e: any) {
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
                 Logger.error('Preview Error', e);
-                await interaction.editReply(`❌ Failed to run preview: ${e.message}`);
+                await interaction.editReply(`❌ Failed to run preview: ${errorMessage}`);
             }
         }
 

@@ -8,6 +8,7 @@ import { validateOwnership } from '../utils/interactionGuard';
 import { renderTaskPanel } from '../views/task.view';
 import { renderAccountDetail } from '../views/account.view';
 import { decrypt } from '../utils/security';
+import { WorkerGuild } from '../interfaces/worker';
 
 // Konstanta validasi delay
 const MAX_DELAY_MS = 86400000; // 24 hours in milliseconds
@@ -76,7 +77,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                 const token = AccountService.getDecryptedToken(account);
                 const guilds = await WorkerService.fetchGuilds(token);
                 
-                const filtered = guilds.filter((g: any) => g.name.toLowerCase().includes(query)).slice(0, 25);
+                const filtered = guilds.filter((g: WorkerGuild) => g.name.toLowerCase().includes(query)).slice(0, 25);
 
                 if (filtered.length === 0) {
                     const noResultEmbed = new EmbedBuilder()
@@ -110,7 +111,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                     .setCustomId(`select_guild_task_${accountId}`)
                     .setPlaceholder('Select a server')
                     .addOptions(
-                        filtered.map((g: any) => new StringSelectMenuOptionBuilder()
+                        filtered.map((g: WorkerGuild) => new StringSelectMenuOptionBuilder()
                             .setLabel(g.name.substring(0, 100))
                             .setValue(g.id)
                             .setDescription(`ID: ${g.id}`)
@@ -147,8 +148,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                     ]
                 });
 
-            } catch (error: any) {
-                await interaction.editReply({ content: `❌ Error fetching guilds: ${error.message}`, embeds: [], components: [] });
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await interaction.editReply({ content: `❌ Error fetching guilds: ${errorMessage}`, embeds: [], components: [] });
             }
         }
 
@@ -235,8 +237,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                     guildName = context.guildName;
                     channelName = context.channelName;
                 }
-            } catch (e: any) {
-                Logger.warn('Failed to fetch context for DB save', e.message);
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                Logger.warn('Failed to fetch context for DB save', errorMessage);
             }
 
             const newTask = await TaskService.create({

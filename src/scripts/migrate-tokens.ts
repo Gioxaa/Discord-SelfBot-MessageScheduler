@@ -60,8 +60,9 @@ async function migrateTokens() {
             }
             migrated++;
             
-        } catch (error: any) {
-            console.log(`[FAILED] ${accountLabel} - ${error.message}`);
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.log(`[FAILED] ${accountLabel} - ${errorMessage}`);
             failed++;
         }
     }

@@ -1,10 +1,11 @@
-import { Worker } from 'worker_threads';
+import { Worker, WorkerOptions } from 'worker_threads';
 import path from 'path';
 import prisma from '../database/client';
 import { Client, ThreadChannel, EmbedBuilder } from 'discord.js';
 import { WorkspaceService } from './workspace.service';
 import { Logger } from '../utils/logger';
 import { generateSecureHash } from '../utils/security';
+import { WorkerData, LogData, WorkerGuild, WorkerChannel, WorkerContext, CacheItem, WorkerResult } from '../interfaces/worker';
 
 export class WorkerService {
     // Core Maps untuk state management
@@ -17,7 +18,7 @@ export class WorkerService {
     private static pendingRestarts = new Map<string, NodeJS.Timeout>(); // AccountID -> Restart Timeout
 
     // LRU Cache dengan max size
-    private static cache = new Map<string, { data: any, expires: number }>();
+    private static cache = new Map<string, CacheItem<WorkerResult>>();
     private static readonly MAX_CACHE_SIZE = 100;
     private static cacheCleanupInterval: NodeJS.Timeout | null = null;
 
@@ -214,10 +215,10 @@ export class WorkerService {
     /**
      * Fetch daftar guild dari Discord user token
      */
-    static async fetchGuilds(token: string): Promise<any[]> {
+    static async fetchGuilds(token: string): Promise<WorkerGuild[]> {
         const cacheKey = `guilds_${generateSecureHash(token)}`;
-        if (this.checkCache(cacheKey)) return this.getCache(cacheKey);
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token });
+        if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerGuild[];
+        const data = await this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token }) as WorkerGuild[];
         this.setCache(cacheKey, data);
         return data;
     }
@@ -225,10 +226,10 @@ export class WorkerService {
     /**
      * Fetch daftar channel dari guild
      */
-    static async fetchChannels(token: string, guildId: string): Promise<any[]> {
+    static async fetchChannels(token: string, guildId: string): Promise<WorkerChannel[]> {
         const cacheKey = `channels_${generateSecureHash(token)}_${guildId}`;
-        if (this.checkCache(cacheKey)) return this.getCache(cacheKey);
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId });
+        if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerChannel[];
+        const data = await this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId }) as WorkerChannel[];
         this.setCache(cacheKey, data);
         return data;
     }
@@ -236,10 +237,10 @@ export class WorkerService {
     /**
      * Fetch context (nama guild & channel) untuk display
      */
-    static async fetchContext(token: string, guildId: string, channelId: string): Promise<{ guildName: string, channelName: string }> {
+    static async fetchContext(token: string, guildId: string, channelId: string): Promise<WorkerContext> {
         const cacheKey = `context_${generateSecureHash(token)}_${guildId}_${channelId}`;
-        if (this.checkCache(cacheKey)) return this.getCache(cacheKey);
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_CONTEXT', token, guildId, channelId });
+        if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerContext;
+        const data = await this.runEphemeralWorker({ mode: 'FETCH_CONTEXT', token, guildId, channelId }) as WorkerContext;
         this.setCache(cacheKey, data);
         return data;
     }
@@ -248,7 +249,7 @@ export class WorkerService {
      * Kirim preview message ke thread
      */
     static async sendPreview(token: string, threadId: string, inviteCode: string, message: string): Promise<void> {
-        return this.runEphemeralWorker({ mode: 'PREVIEW', token, threadId, inviteCode, message });
+        await this.runEphemeralWorker({ mode: 'PREVIEW', token, threadId, inviteCode, message });
     }
 
     /**
@@ -569,7 +570,7 @@ export class WorkerService {
     /**
      * Forward log ke thread user
      */
-    static async forwardLog(client: Client, userId: string, logData: any): Promise<void> {
+    static async forwardLog(client: Client, userId: string, logData: LogData): Promise<void> {
         try {
             const user = await prisma.user.findUnique({ where: { id: userId } });
             if (!user || !user.logThreadId) return;
@@ -631,11 +632,11 @@ ${logData.url ? `<a:arrow:1306059259615903826> **Link**   : [Jump to Message](${
         return true;
     }
 
-    private static getCache(key: string): any {
+    private static getCache(key: string): WorkerResult {
         return this.cache.get(key)?.data;
     }
 
-    private static setCache(key: string, data: any): void {
+    private static setCache(key: string, data: WorkerResult): void {
         // LRU Eviction jika melebihi max size
         if (this.cache.size >= this.MAX_CACHE_SIZE) {
             const firstKey = this.cache.keys().next().value;
@@ -646,14 +647,14 @@ ${logData.url ? `<a:arrow:1306059259615903826> **Link**   : [Jump to Message](${
 
     // ==================== WORKER HELPERS ====================
 
-    private static createWorker(workerData: any): Worker {
+    private static createWorker(workerData: WorkerData): Worker {
         const isTsNode = (process as any)[Symbol.for('ts-node.register.instance')] || __filename.endsWith('.ts');
         const workerFileName = 'bot.worker';
         const finalPath = isTsNode
             ? path.resolve(__dirname, `../workers/${workerFileName}.ts`)
             : path.resolve(__dirname, `../workers/${workerFileName}.js`);
 
-        const workerConf: any = {
+        const workerConf: WorkerOptions = {
             workerData,
             resourceLimits: { maxOldGenerationSizeMb: 2048 }
         };
@@ -662,10 +663,10 @@ ${logData.url ? `<a:arrow:1306059259615903826> **Link**   : [Jump to Message](${
         return new Worker(finalPath, workerConf);
     }
 
-    private static runEphemeralWorker(workerData: any): Promise<any> {
+    private static runEphemeralWorker(workerData: WorkerData): Promise<WorkerResult> {
         return new Promise((resolve, reject) => {
             const worker = this.createWorker(workerData);
-            let data: any = null;
+            let data: WorkerResult = null as any;
 
             // Timeout untuk ephemeral workers (30 detik)
             const timeout = setTimeout(() => {

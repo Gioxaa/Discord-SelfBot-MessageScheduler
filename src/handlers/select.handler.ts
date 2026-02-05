@@ -6,6 +6,7 @@ import { renderTaskPanel } from '../views/task.view';
 import { Logger } from '../utils/logger';
 import { validateOwnership } from '../utils/interactionGuard';
 import { renderAccountDetail } from '../views/account.view';
+import { WorkerGuild, WorkerChannel } from '../interfaces/worker';
 
 export async function handleSelect(interaction: StringSelectMenuInteraction) {
     // Security Check
@@ -61,7 +62,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                     .setCustomId(`select_guild_task_${accountId}`)
                     .setPlaceholder(`Select a server (Page 1/${totalPages})`)
                     .addOptions(
-                        slicedGuilds.map((g: any) => new StringSelectMenuOptionBuilder()
+                        slicedGuilds.map((g: WorkerGuild) => new StringSelectMenuOptionBuilder()
                             .setLabel(g.name.substring(0, 100))
                             .setValue(g.id)
                             .setDescription(`ID: ${g.id}`)
@@ -111,8 +112,9 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                     ]
                 });
 
-            } catch (error: any) {
-                await interaction.editReply({ content: `❌ Failed to fetch servers: ${error.message}`, embeds: [], components: [] });
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await interaction.editReply({ content: `❌ Failed to fetch servers: ${errorMessage}`, embeds: [], components: [] });
             }
         }
 
@@ -173,7 +175,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                     .setCustomId(`select_channel_task_${accountId}_${guildId}`)
                     .setPlaceholder(`Choose a channel (Page 1/${totalPages})`)
                     .addOptions(
-                        slicedChannels.map((c: any) => new StringSelectMenuOptionBuilder()
+                        slicedChannels.map((c: WorkerChannel) => new StringSelectMenuOptionBuilder()
                             .setLabel(c.name.substring(0, 50))
                             .setValue(`${c.id}|${c.rateLimitPerUser}`)
                             .setDescription(`Slowmode: ${c.rateLimitPerUser}s`)
@@ -221,8 +223,9 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                     ]
                 });
 
-            } catch (error: any) {
-                await interaction.editReply({ content: `❌ Failed to fetch channels: ${error.message}`, embeds: [], components: [] });
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                await interaction.editReply({ content: `❌ Failed to fetch channels: ${errorMessage}`, embeds: [], components: [] });
             }
         }
 
@@ -322,7 +325,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
             await interaction.deferUpdate();
             
             const view = await renderAccountDetail(accountId);
-            await interaction.editReply({ ...view } as any);
+            await interaction.editReply({ ...view });
         } else {
             // Unknown select menu - Fallback handler
             Logger.warn(`Unhandled select customId: ${customId}`, 'SelectHandler');

@@ -30,8 +30,9 @@ export class WebhookController {
             
             res.status(200).send('OK');
 
-        } catch (err: any) {
-            Logger.error('Webhook processing failed', err, 'Webhook');
+        } catch (err: unknown) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            Logger.error('Webhook processing failed', errorMessage, 'Webhook');
             res.status(500).send('Error');
         }
     }

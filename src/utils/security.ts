@@ -110,12 +110,13 @@ function decryptGCM(parts: string[]): string {
         decrypted += decipher.final('utf8');
 
         return decrypted;
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         // GCM akan throw error jika auth tag tidak cocok (data corrupted/tampered)
-        if (error.message.includes('Unsupported state') || error.message.includes('auth')) {
+        if (errorMessage.includes('Unsupported state') || errorMessage.includes('auth')) {
             throw new Error('Decrypt: Authentication failed - data may be corrupted or tampered');
         }
-        throw new Error(`Decrypt: Failed to decrypt - ${error.message}`);
+        throw new Error(`Decrypt: Failed to decrypt - ${errorMessage}`);
     }
 }
 
@@ -145,8 +146,9 @@ function decryptLegacyCBC(parts: string[]): string {
         decrypted = Buffer.concat([decrypted, decipher.final()]);
 
         return decrypted.toString('utf8');
-    } catch (error: any) {
-        throw new Error(`Decrypt (Legacy): Failed to decrypt - ${error.message}`);
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Decrypt (Legacy): Failed to decrypt - ${errorMessage}`);
     }
 }
 

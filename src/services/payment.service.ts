@@ -2,9 +2,11 @@ import { Logger } from '../utils/logger';
 import axios from 'axios';
 import prisma from '../database/client';
 import { User, Client } from 'discord.js';
+import { Payment } from '@prisma/client';
 import { config, PRODUCTS } from '../config';
 import { WorkspaceService } from './workspace.service';
 import { renderPaymentSuccess } from '../views/payment.view';
+import { PakasirWebhookPayload } from '../interfaces/worker';
 
 export class PaymentService {
     /**
@@ -110,7 +112,7 @@ export class PaymentService {
                 transactionId: transaction.id
             };
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Log full error
             Logger.error('[Payment] Create Transaction Failed', error, 'PaymentService');
 
@@ -162,8 +164,9 @@ export class PaymentService {
             await axios.post(`${config.pakasir.apiUrl}/transactioncancel`, payload, {
                 headers: { 'Content-Type': 'application/json' }
             });
-        } catch (e: any) {
-            Logger.error('Failed to cancel at Gateway', e, 'PaymentService');
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            Logger.error('Failed to cancel at Gateway', errorMessage, 'PaymentService');
             // We continue to mark as cancelled locally so user is not stuck, 
             // but log the error. In strict mode we might throw.
         }
@@ -212,13 +215,19 @@ export class PaymentService {
         return 'PENDING';
     }
 
-    static async handleWebhook(payload: any, client: Client) {
-        const { order_id, status } = payload;
+    static async handleWebhook(payload: PakasirWebhookPayload, client: Client) {
+        const order_id = payload.order_id || payload.merchant_ref;
+        const { status } = payload;
+
+        if (!order_id) {
+            Logger.error('[Payment] Webhook payload missing order_id/merchant_ref', payload, 'PaymentService');
+            throw new Error('Invalid Webhook Payload: Missing ID');
+        }
 
         // Gunakan transaction dengan atomic check-and-update untuk mencegah race condition
         const result = await prisma.$transaction(async (tx) => {
             const transaction = await tx.payment.findUnique({
-                where: { id: order_id },
+                where: { id: order_id as string },
                 include: { user: true }
             });
 
@@ -274,7 +283,7 @@ export class PaymentService {
      * Handle side effects setelah payment sukses (Discord API calls)
      * Dipisah dari transaction karena external API tidak boleh di dalam DB transaction
      */
-    private static async handlePostPaymentSideEffects(transaction: any, client: Client, days: number) {
+    private static async handlePostPaymentSideEffects(transaction: Payment, client: Client, days: number) {
         // 1. Ensure Workspace Exists
         if (config.guildId) {
             try {
@@ -307,7 +316,7 @@ export class PaymentService {
     /**
      * @deprecated Use handleWebhook instead - kept for backward compatibility
      */
-    static async processSuccessfulPayment(transaction: any, client: Client) {
+    static async processSuccessfulPayment(transaction: Payment, client: Client) {
         // Delegate ke handleWebhook untuk konsistensi dan atomic operation
         return this.handleWebhook({ order_id: transaction.id, status: 'completed' }, client);
     }

@@ -1,6 +1,7 @@
+import { Task, Account } from '@prisma/client';
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 
-export function renderTaskPanel(task: any, overrideStatus?: string) {
+export function renderTaskPanel(task: Task & { account?: Account | null }, overrideStatus?: string) {
     const status = overrideStatus || task.status;
     
     // Sanitize Inputs

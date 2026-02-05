@@ -1,3 +1,4 @@
+import { Account } from '@prisma/client';
 import prisma from '../database/client';
 import { encrypt, decrypt } from '../utils/security';
 import { Logger } from '../utils/logger';
@@ -41,7 +42,7 @@ export class AccountService {
         }
     }
 
-    static getDecryptedToken(account: any): string {
+    static getDecryptedToken(account: Account): string {
         return decrypt(account.token);
     }
 
